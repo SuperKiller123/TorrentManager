@@ -1,0 +1,16 @@
+# A felhasználó adatai, amelyek soha nem kerülhetnek fel GitHubra
+beallitasok.json
+kezelt_torrentek.json
+bithumen_bongeszo_profil/
+automatizalas.log
+
+# Fordítás és függőségek
+.venv/
+.browser-cache/
+build/
+dist/
+__pycache__/
+*.pyc
+*.spec
+*.log
+*.zip
