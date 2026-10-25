@@ -1,4 +1,4 @@
-# Torrent Manager v0.3 – egyetlen PowerShell-parancsból készül el a Windows-verzió.
+# Torrent Manager v0.4 – egyetlen PowerShell-parancsból készül el a Windows-verzió.
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -44,7 +44,7 @@ if (-not (Get-ChildItem $bundledBrowser -Directory -Filter 'chromium-*' -ErrorAc
 }
 
 # Külön ZIP a GitHub Releases oldalon közzétehető, hordozható verzióhoz.
-$portable = Join-Path $PSScriptRoot 'dist\TorrentManager-v0.3-Windows-portable.zip'
+$portable = Join-Path $PSScriptRoot 'dist\TorrentManager-v0.4-Windows-portable.zip'
 if (Test-Path $portable) { Remove-Item $portable -Force }
 Compress-Archive -Path (Join-Path $bundle '*') -DestinationPath $portable -CompressionLevel Optimal
 Write-Host "Hordozható program: $bundle\TorrentManager.exe"
@@ -61,14 +61,14 @@ foreach ($candidate in @(
 if ($iscc) {
     & $iscc 'installer.iss'
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup build sikertelen." }
-    Write-Host "Telepítő: dist\installer\TorrentManager-Setup-v0.3.0.exe"
+    Write-Host "Telepítő: dist\installer\TorrentManager-Setup-v0.4.0.exe"
 } else {
     Write-Host "Inno Setup 6 nem található. Hordozható ZIP készült telepítő helyett."
 }
 
 # A frissítő automatikusan kizárólag a megfelelő SHA-256 értékű telepítőt fogadja el.
 $hashes = @()
-$setup = Join-Path $PSScriptRoot 'dist\installer\TorrentManager-Setup-v0.3.0.exe'
+$setup = Join-Path $PSScriptRoot 'dist\installer\TorrentManager-Setup-v0.4.0.exe'
 foreach ($file in @($portable, $setup)) {
     if (Test-Path $file) {
         $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()

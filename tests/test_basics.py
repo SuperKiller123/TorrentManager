@@ -20,12 +20,14 @@ class SettingsTests(unittest.TestCase):
    importlib.reload(TorrentManager)
    result=TorrentManager.read_settings()
    self.assertEqual(result['qb_url'],'http://127.0.0.1:8080')
-   self.assertTrue(result['browse_url'].startswith('https://bithumen.be/browse.php?'))
-   self.assertNotIn('qb_username',result)
-   self.assertNotIn('qb_password',result)
-   self.assertNotIn('check_minutes',result)
-   self.assertNotIn('max_managed_torrents',result)
-   self.assertNotIn('enable_additions',result)
+   from policy import TOP_URL
+   self.assertEqual(TOP_URL,"https://bithumen.be/browse.php?sort=seeders&d=DESC")
+   self.assertNotIn('browse_url',result)
+   self.assertEqual(result['qb_username'],'admin')
+   self.assertEqual(result['qb_password'],'')
+   self.assertEqual(result['check_minutes'],5)
+   self.assertEqual(result['max_managed_torrents'],50)
+   self.assertEqual(result['mode'],'dry')
 
  def test_saved_settings_take_precedence(self):
   with tempfile.TemporaryDirectory() as td,patch.dict(os.environ,{'LOCALAPPDATA':td}):

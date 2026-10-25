@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 import requests
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 INSTALLER_PATTERN = re.compile(r"^TorrentManager-Setup-v[0-9]+(?:\.[0-9]+){1,3}\.exe$", re.I)
 CHECKSUM_NAME = "SHA256SUMS.txt"

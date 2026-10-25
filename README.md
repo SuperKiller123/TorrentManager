@@ -1,90 +1,56 @@
-# Torrent Manager v0.3 – Windows 10/11
+# Torrent Manager v0.4.0
 
-**Modern, magyar nyelvű kezelőfelület** a BitHuMen toplistájának qBittorrenttel történő kezeléséhez. A v0.3 **a felhasználó által működőnek tesztelt v0.2 motorra épül**; a toplista feldolgozását, a torrentek hozzáadását, a tárhelykorlátozást és a törlési biztonsági feltételeket megtartja.
+Magyar nyelvű, Windowsra csomagolható Torrent Manager, amely a BitHuMen **legtöbbet seedelt** torrentjeit figyeli, és a qBittorrent Web UI-t használja. A GUI külön háttérmotorral működik, Playwright/Chromium bejelentkezési profillal.
 
-> **Fontos:** Ez a ZIP **forráskódot** tartalmaz. A kész, Windows alatt futtatható `.exe` változatot a GitHub Actions ingyenes Windows-fordítása vagy a helyi `build-windows.ps1` hozza létre. A kiadás Windowsos működését ezen a fejlesztői gépen nem volt lehetőség teljesen ellenőrizni.
+**Rögzített toplista:** `https://bithumen.be/browse.php?sort=seeders&d=DESC`. Nincs felhasználó által szerkeszthető toplista-URL.
 
-## Mi új a v0.3-ban?
+## Újdonságok
 
-- **Újratervezett, sötét kezelőfelület**: bal oldali menü, áttekintés, biztonsági beállítások, napló és frissítési központ.
-- **Áttekintő oldal**: állapot, indítás/leállítás, nyilvántartott torrentek száma, qBittorrent összes torrentszáma (sikeres API-kapcsolat esetén), tárhelyhasználat, beállított időköz, legutóbbi események.
-- **Kényelmesebb beállítások**: görgethető felület, fájlkezelő, jelszó megjelenítése, mentés, korábban megadott értékek megőrzése.
-- **Indítási hibajavítás**: a program `TorrentMotor.exe` indítása esetén a mellékelt `browsers` mappában keresi a Playwright Chromiumot; ha az nincs meg, a felhasználó `%LOCALAPPDATA%\ms-playwright` mappáját is ellenőrzi. A motor közvetlen indításakor is működik a keresés. A nem nulla kilépési kód a GUI naplójában látható.
-- **Frissítések**: GitHub Releases-ről új kiadás ellenőrzése; Windows-telepítő letöltése és kézi jóváhagyással történő indítása **csak egyező SHA-256 ellenőrzőösszeg esetén**. A program nem telepít frissítést magától.
-- **Automatikus Windows-fordítás**: GitHub Actions munkafolyamat, amely v0.3-as telepítőt, hordozható ZIP-et és SHA256SUMS.txt-t hoz létre. A `v...` címkék automatikusan GitHub Release-t is létrehoznak.
+- **Kezdőlap**: összes torrent, valóban meglévő, alkalmazás által kezelt torrentek, tárhely, ellenőrzési időköz, beállítás-összegzés, csak tényleges műveleteket mutató mini eseménynapló.
+- **Letisztult beállítások**: a Mentés gomb csak módosításkor aktív; egyetlen torrentszám határozza meg a figyelt **top N** tartományt és az összes qBittorrent-torrent maximális számát; egész százalékos tárhelyhatár.
+- **Módok**: Próbaüzem; Csak új torrentek hozzáadása; Új torrentek hozzáadása és törlése **letöltött fájlokkal együtt**.
+- **Méretkorlát**: minimum és maximum GiB; a **0 kikapcsolt korlátot** jelent. A motor a hozzáadás előtt a `.torrent` metainfóból ellenőrzi a méretet. Ismeretlen metainfót nem ad hozzá.
+- **Windows-indítás**: a jelenlegi Windows-felhasználó bejelentkezésekor a GUI indítása; opcionálisan a qBittorrent indítása. Az automatizálás az Indítás gombbal indul, nem automatikusan.
+- **GitHub**: a forrás feltöltésekor automatikus Windows build, `v0.4.0` címke alapján GitHub Release; az alkalmazás alapértelmezett frissítési tárolója: `SuperKiller123/TorrentManager`.
+- **Nincs CPU-hőmérséklet-figyelés vagy automatikus hibernálás/kikapcsolás.**
 
-## A korábbi beállításaid megmaradnak
+## Biztonsági szabályok
 
-A v0.2-höz hasonlóan a felhasználói fájlok helye:
+A törlés **végleges**, a `qBittorrent /api/v2/torrents/delete` API-t `deleteFiles=true` paraméterrel hívja. Csak a Torrent Manager saját `kezelt_torrentek.json` állományában tárolt **hash és név** egyezése esetén töröl; azonosítatlan torrenteket nem töröl. A mentési útvonalnak meg kell egyeznie a kiválasztott mappával, megosztott tartalomútvonal esetén nem töröl.
 
-```text
-%LOCALAPPDATA%\TorrentManager\beallitasok.json
-%LOCALAPPDATA%\TorrentManager\kezelt_torrentek.json
-%LOCALAPPDATA%\TorrentManager\bithumen_bongeszo_profil\
-%LOCALAPPDATA%\TorrentManager\automatizalas.log
-```
+A törléshez a beállított **teljes top N** lista **két külön sikeres ellenőrzése** és a „Hozzáadás és törlés” üzemmód kell. Sikertelen/hiányos lekérdezéskor nincs törlés. A várható teljes méret alapján is ellenőrzi a tárhelyhatárt, de a qBittorrent már aktív letöltéseit **nem állítja meg**; a beállított lemezlimitet hardveres garanciaként nem szabad értelmezni.
 
-**Ne töröld ezeket a fájlokat.** Az új verzió ugyanazokat a beállításokat és BitHuMen böngészőprofilt használja. A meglévő v0.2-es programot érdemes biztonsági másolatként megtartani, amíg az új verziót nem tesztelted.
+**Első indításnál használj Próbaüzemet.** A törléses módra csak azután válts, hogy ellenőrizted a saját torrentlistát, a rangsort és a naplót. Letöltött fájlok törlése előtt készíts biztonsági mentést.
 
-## Ajánlott: automatikus .exe fordítás GitHubon
+## Windows-frissítés, telepítés nélkül fordítás a számítógépeden
 
-A v0.3 forrásmappájában már benne van `.github/workflows/build-windows.yml`.
+A GitHub-projekted: <https://github.com/SuperKiller123/TorrentManager>
 
-1. Hozz létre egy **privát** GitHub-repozitóriumot; csak a forrásfájlokat töltsd fel, **ne** a beállításfájlokat, a böngészőprofilt, a torrentfájlokat vagy jelszavakat. A GitHub Actions build a privát tárolóban is működhet a fiókod erőforrás-korlátai szerint.
-2. Töltsd fel a **v0.3 mappa tartalmát** a repó gyökerébe (így a `.github` rejtett mappa is megmarad).
-3. Nyisd meg a **GitHub → Actions → Torrent Manager – Windows build és kiadás → Run workflow** részt.
-4. A sikeres futás után **Artifacts → TorrentManager-v0.3-Windows** alatt töltheted le a telepítőt, a hordozható ZIP-et és a SHA256SUMS.txt-t.
-5. Futtasd a telepítőt, vagy csomagold ki a hordozható ZIP-et egy új mappába. A hordozható verzióban az **összes** fájlt és a `browsers` almappát együtt kell tartani; a `TorrentManager.exe` indítja a GUI-t.
+1. **GitHub Desktop** → klónozott `TorrentManager` projekt megnyitása.
+2. A `TorrentManager_v0.4` mappából másold át a **tartalmat** a GitHub Desktop által kezelt `TorrentManager` mappába, a régieket felülírva. Ne másolj egy új alkönyvtárat; a `.github/workflows/build-windows.yml` pontosan a repó gyökerében legyen. A korábbi, felesleges forrásfájlokat a GitHub Desktopban látható módon távolítsd el.
+3. Ellenőrizd, hogy a felülírás előtt **nem** tartalmaz személyes `beallitasok.json`, böngészőprofil vagy torrent-fájlokat a feltöltés.
+4. GitHub Desktop → **Summary:** `Torrent Manager v0.4.0` → **Commit to main** → **Push origin**.
+5. A `main` ágba érkező push **automatikusan** elindítja az Actions buildet: <https://github.com/SuperKiller123/TorrentManager/actions>. A `TorrentManager-v0.4-Windows` artifact tartalmazza az Inno Setup telepítőt, a hordozható ZIP-et és a SHA256SUMS.txt állományt.
+6. Először az Actions-artifactból telepítsd a v0.4-et, majd **Próbaüzemben teszteld**. A v0.3-at egyelőre tartsd meg.
+7. Ha a teszt sikerült, a GitHub **Releases → Draft a new release** oldalon hozd létre a `v0.4.0` címkét a `main` ágból. A címke push-ja külön buildet indít, amely a kész telepítőt és ellenőrzőösszeget feltölti a megfelelő GitHub Release-hez. A frissítés ellenőrzése az alkalmazásban már erre a nyilvános kiadásra támaszkodik. A létrehozott kiadás még üres lehet, amíg a build fut.
 
-**Frissítési központ aktiválása:** amikor rendelkezel saját **nyilvános** GitHub-repozitóriummal és közzétett GitHub Release-zel, a Frissítések oldalon írd be a `felhasználónév/tárolónév` értéket, és mentsd el. A frissítő csak a nyilvános Releases API-t használja, **privát repó esetén nem működik token nélkül**. A kód nem kér GitHub-jelszót. Ha az alap repód privát, használhatsz külön nyilvános, kizárólag kiadásokat tartalmazó repót is; a GitHub Actions munkafolyamatot ebben az esetben ehhez kell igazítani.
+**Fontos:** a GitHub nyilvános projektje a forráskódot is megosztja. A felhasználói beállítások, jelszavak és BitHuMen bejelentkezési profil a telepített program mellett **nem**, hanem a `%LOCALAPPDATA%\TorrentManager` mappában maradnak; ne töltsd fel ezeket a GitHubra.
 
-**Jövőbeli automatikus kiadások:** ha a forrásodhoz megfelelő `v0.3.0` Git-címkét hozol létre és feltöltöd, a workflow automatikusan elkészíti a GitHub Release-t a telepítővel. Az új verziókhoz módosítani kell a `updater.py` verziószámát, a telepítő és buildfájl verziószámait, a csomagneveket és a munkafolyamat nevét.
+A build Windows alatt a `build-windows.ps1` fájlt futtatja és a Playwright Chromiumot is csomagolja. A `requirements-build.txt` csak a buildhez szükséges függőségeket tartalmazza. Python-forrásból futtatáshoz `python -m pip install -r requirements.txt`, `python -m playwright install chromium`, majd `python TorrentManager.py` használható.
 
-## Alternatíva: saját gépen való fordítás
+### Hogyan frissül a telepített v0.3?
 
-Szükséges: Windows 10/11 x64 és Python 3.13; Inno Setup 6 opcionális. A projektmappában nyiss PowerShellt, majd:
+A v0.3 **Frissítések** oldalán a tároló legyen `SuperKiller123/TorrentManager`, és legyen **mentve**. Miután a `v0.4.0` GitHub Release már rendelkezik a `TorrentManager-Setup-v0.4.0.exe` és `SHA256SUMS.txt` fájlokkal, a „Frissítés keresése” megkeresheti, letöltheti, ellenőrizheti és jóváhagyás után elindíthatja a telepítőt. Alternatíva az Actions artifactból származó telepítő kézi indítása.
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\build-windows.ps1"
-```
+A frissítő SHA-256 ellenőrzése védi az átviteli sérülésektől, **nem egyenértékű a Windows kódaláírással**. Egy magát kiadónak feltüntető, idegen feltöltés veszélyes lehet; mindig csak a saját GitHub-repóból származó telepítőt használj.
 
-Kimenet:
+## Beállítások helye, átállás v0.3-ról
 
-```text
-dist\TorrentManager\TorrentManager.exe
-dist\TorrentManager\TorrentMotor.exe
-dist\TorrentManager\browsers\...
-dist\TorrentManager-v0.3-Windows-portable.zip
-dist\installer\TorrentManager-Setup-v0.3.0.exe  (Inno Setup 6 mellett)
-dist\SHA256SUMS.txt
-```
+- `%LOCALAPPDATA%\TorrentManager\beallitasok.json`
+- `%LOCALAPPDATA%\TorrentManager\kezelt_torrentek.json`
+- `%LOCALAPPDATA%\TorrentManager\automatizalas.log`
+- `%LOCALAPPDATA%\TorrentManager\bithumen_bongeszo_profil\`
 
-A Chromiumot a script a `.browser-cache` könyvtárban tárolja, újabb fordításnál újrahasználhatja. Ha csak a Python-kód változott, a beállításokat, a böngészőt és a fejlesztői környezetet nem kell elölről létrehozni.
+A v0.4 a meglévő adatokat **nem írja felül** a telepítéssel, a régi mezőket az új sémára alakítja át a következő mentéskor. Régi fájltörlés nélküli üzemmódból nem kapcsol automatikusan fájltörlésre. A régi `70.0` tárhelyhatárt `70` százalékként kezeli.
 
-## Fejlesztői futtatás
-
-```powershell
-py -3.13 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m playwright install chromium
-.\.venv\Scripts\python.exe TorrentManager.py
-```
-
-A GUI a motor elindítása nélkül is megnyílik. **A program induláskor nem kezdi el az automatizálást, és nem indul automatikusan a Windows indításával sem.**
-
-## Biztonság
-
-- Az automatikus torrent- és fájltörlés alapértelmezés szerint **kikapcsolt**. A régebben mentett felhasználói kapcsolók megmaradnak; **frissítés után ellenőrizd a beállításokat**.
-- A törlési logika továbbra is csak a program által igazolt torrentazonosítókkal dolgozik és csak teljes, legalább 50 elemű toplista mellett tud eltávolítani. A `delete_files` opció tényleges adatvesztést okozhat.
-- A tárhelykorlát csak az **új torrentek hozzáadását** tiltja a beállított százaléknál. Már elindult letöltéseket nem szakít meg.
-- A qBittorrent-jelszó továbbra is a helyi `beallitasok.json` fájlban **egyszerű szövegként** szerepel. Ezt ne töltsd fel GitHubra. A repó `.gitignore` fájlja tiltja a leggyakoribb helyi adatfájlokat, de a feltöltés előtt magad is ellenőrizd a fájlokat.
-- A frissítő HTTPS-en használja a GitHubot, és az ugyanahhoz a kiadáshoz tartozó `SHA256SUMS.txt` értékével hasonlítja össze a letöltött `.exe`-t. Ez letöltési sérülés ellen véd, de **nem helyettesíti a kódaláírást vagy a kiadó megbízhatóságát**. A telepítőt a Windows figyelmeztetéssel fogadhatja, ha nincs aláírva.
-- Kizárólag jogszerűen hozzáférhető és megosztható tartalmakhoz használd.
-
-## Tesztelés
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-```
-
-A 10 offline teszt a beállításmigrációra, a torrent-hozzáadás paramétereire, a böngészőútvonalra és a kiadás/ellenőrzőösszeg kezelésére terjed ki. A GitHubos Windows-fordítást, a BitHuMen bejelentkezést és a teljes élő qBittorrent-működést új Windows-környezetben még tesztelni kell.
+**Még nem történt élő BitHuMen- és qBittorrent-integrációs teszt ebben a környezetben.** A Python-szintű tesztek offline futnak; a Windowsra csomagolt .exe-t a GitHub-fordítás után a saját gépeden kell ellenőrizned.

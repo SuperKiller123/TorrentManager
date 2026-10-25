@@ -7,23 +7,9 @@ import requests
 from playwright.sync_api import sync_playwright
 
 from paths import SETTINGS as CFG, STATE, PROFILE, LOG, DATA_DIR, migrate_old_data, find_playwright_browsers
-DEFAULT={
- "qb_url":"http://127.0.0.1:8080",
- "qb_username":"admin",
- "qb_password":"",
- "qb_save_path":"",
- "check_minutes":5,
- "max_disk_usage_percent":70,
- "top_count":50,
- "max_managed_torrents":50,
- "browse_url":"https://bithumen.be/browse.php?sort=times_completed&d=DESC&type=legtobbet_letoltottek",
- "dry_run":True,
- "enable_additions":False,
- "enable_deletions":False,
- "delete_files":False,
- "minimum_valid_rows_for_deletion":50,
- "headless":False
-}
+from policy import TOP_URL, DEFAULT, validate_settings, allowed_size
+from metainfo import torrent_size, TorrentMetadataError
+
 def log(msg):
  print(msg,flush=True)
  logging.info(msg)
@@ -38,12 +24,13 @@ def config():
  if not CFG.exists():
   write_json(CFG,DEFAULT)
   raise SystemExit("Létrehoztam: beallitasok.json. Állítsd be, majd indítsd újra.")
- c={**DEFAULT,**read_json(CFG,{})}
- if not c.get("qb_save_path","").strip():
+ c=validate_settings(read_json(CFG,{}))
+ if not str(c.get("qb_save_path","")).strip():
   raise ValueError("Válassz letöltési mappát a Beállításokban.")
- if c["enable_deletions"] and not c["enable_additions"]:
-  log("Figyelmeztetés: a törlés aktív, hozzáadás nem.")
+ if not c.get("qb_password"):
+  raise ValueError("Hiányzik a qBittorrent jelszó a Beállításokban.")
  return c
+
 def qb_login(c):
  s=requests.Session()
  s.headers["Referer"]=c["qb_url"].rstrip("/")+"/"
@@ -71,36 +58,37 @@ def disk_percent(path):
  u=shutil.disk_usage(path)
  return u.used/u.total*100
 def parse_list(page,c):
- # Csak a tényleges torrenttáblázat sorait értelmezzük, az ismétléseket ID szerint szűrjük.
+ """Torrenttáblázat seederek oszlopával; a sorrend a szerver szerinti seeders DESC."""
  result={}
  for table in page.locator("table").all():
   rows=table.locator("tr")
   count=rows.count()
-  dl_idx=None
+  seed_idx=None
   for i in range(min(count,8)):
    cells=rows.nth(i).locator(":scope > th, :scope > td")
-   labels=[x.strip() for x in cells.all_text_contents()]
+   labels=[re.sub(r"[^a-záéíóöőúüű]", "", t.casefold()) for t in cells.all_text_contents()]
    for j,label in enumerate(labels):
-    if label.casefold()=="dls":dl_idx=j;break
-   if dl_idx is not None:break
-  if dl_idx is None:continue
+    if label in ("s", "seed", "seeds", "seeder", "seeders", "seedelő", "seedelők", "feltöltők"):
+     seed_idx=j;break
+   if seed_idx is not None:break
+  if seed_idx is None:continue
   for i in range(count):
    row=rows.nth(i)
    cells=row.locator(":scope > th, :scope > td")
-   if cells.count()<=dl_idx:continue
+   if cells.count()<=seed_idx:continue
    a=row.locator('a[href*="details.php?id="]')
    if a.count()==0:continue
    href=a.first.get_attribute("href") or ""
    tid=parse_qs(urlparse(urljoin("https://bithumen.be/",href)).query).get("id",[""])[0]
    if not tid.isdigit():continue
    name=(a.first.get_attribute("title") or a.first.inner_text()).strip()
-   raw=cells.nth(dl_idx).inner_text().strip()
+   raw=cells.nth(seed_idx).inner_text().strip()
    if not re.fullmatch(r"[\d\s.,]+",raw):continue
-   dls=int(re.sub(r"[^\d]","",raw))
-   if tid not in result or dls>result[tid]["dls"]:
-    result[tid]={"id":tid,"name":name,"dls":dls,
-                 "url":urljoin("https://bithumen.be/",href)}
- return sorted(result.values(),key=lambda x:-x["dls"])[:int(c["top_count"])]
+   seeds=int(re.sub(r"[^\d]","",raw))
+   if tid not in result or seeds>result[tid]["seeders"]:
+    result[tid]={"id":tid,"name":name,"seeders":seeds,"url":urljoin("https://bithumen.be/",href)}
+ return sorted(result.values(),key=lambda x:(-x["seeders"],x["id"]))[:int(c["max_managed_torrents"])]
+
 def get_torrent_file(page,item):
  # A letöltési link HTML-je oldalspecifikus; csak .torrent tartalmat fogadunk el.
  page.goto(item["url"],wait_until="domcontentloaded",timeout=45000)
@@ -137,20 +125,20 @@ def add(s,c,data,name):
  raise RuntimeError("Sikertelen hozzáadás: "+body[:250])
 def delete_owned(s,c,hash_):
  r=s.post(c["qb_url"].rstrip("/")+"/api/v2/torrents/delete",
-          data={"hashes":hash_,"deleteFiles":"true" if c["delete_files"] else "false"},
+          data={"hashes":hash_,"deleteFiles":"true"},
           timeout=45)
  r.raise_for_status()
 def collect_top_pages(page,c):
  """Oldalanként legfeljebb 15 találat; a teljes listát összefésüljük."""
- base=c["browse_url"]
+ base=TOP_URL
  parsed=urlparse(base)
  params=parse_qs(parsed.query,keep_blank_values=True)
  params.pop("page",None)
- limit=max(1,int(c["top_count"]))
+ limit=max(1,int(c["max_managed_torrents"]))
  found={}
  previous_signature=None
  # 15 elem / oldal, plusz némi tartalék; nem végtelen ciklus.
- max_pages=min(30,(limit+14)//15+3)
+ max_pages=min(40,(limit+14)//15+3)
  for page_index in range(max_pages):
   query={k:v[-1] for k,v in params.items()}
   if page_index > 0:
@@ -165,7 +153,7 @@ def collect_top_pages(page,c):
   for key in ("sort","d","type","search"):
    if key in params and actual_params.get(key)!=params[key]:
     raise RuntimeError(f"A lista szűrője megváltozott ({key}): {page.url}")
-  rows=parse_list(page,{**c,"top_count":limit})
+  rows=parse_list(page,c)
   if not rows:
    if page_index==0:raise RuntimeError("Az első oldalon nincs feldolgozható torrent.")
    break
@@ -175,14 +163,14 @@ def collect_top_pages(page,c):
   previous_signature=signature
   before=len(found)
   for item in rows:
-   if item["id"] not in found or item["dls"]>found[item["id"]]["dls"]:
+   if item["id"] not in found or item["seeders"]>found[item["id"]]["seeders"]:
     found[item["id"]]=item
   log(f"Toplista {page_index+1}. oldal: {len(rows)} sor, összesen {len(found)} egyedi.")
   if len(found)>=limit:break
   if len(rows)<15:break
   if len(found)==before:
    raise RuntimeError("A lapozás nem hozott új torrenteket.")
- items=sorted(found.values(),key=lambda x:(-x["dls"],x["id"]))[:limit]
+ items=sorted(found.values(),key=lambda x:(-x["seeders"],x["id"]))[:limit]
  return items
 
 def wait_for_bithumen_login(page,c):
@@ -199,7 +187,7 @@ def wait_for_bithumen_login(page,c):
    page.wait_for_timeout(3000)
    continue
   try:
-   page.goto(c["browse_url"],wait_until="domcontentloaded",timeout=45000)
+   page.goto(TOP_URL,wait_until="domcontentloaded",timeout=45000)
    current=urlparse(page.url)
    if current.path.endswith("/login.php"):
     if not notified:
@@ -207,7 +195,7 @@ def wait_for_bithumen_login(page,c):
      notified=True
     page.wait_for_timeout(3000)
     continue
-   if current.path.endswith("/browse.php") and parse_list(page,{**c,"top_count":1}):
+   if current.path.endswith("/browse.php") and parse_list(page,c):
     log("BitHuMen bejelentkezés ellenőrizve; toplista elérhető.")
     return
    if not notified:
@@ -219,96 +207,153 @@ def wait_for_bithumen_login(page,c):
     notified=True
   page.wait_for_timeout(3000)
 
+def _has_owned_torrent(rec, torrent):
+ """Soha ne töröljünk név-egyezés alapján: csak nyilvántartott hash + azonos név."""
+ return (bool(rec.get("hash")) and
+         rec["hash"].casefold()==str(torrent.get("hash","")).casefold() and
+         rec.get("name","").casefold()==str(torrent.get("name","")).casefold())
+
+def _in_target_folder(torrent, path):
+ """Kétes/áthelyezett fájlokhoz nem nyúlunk."""
+ try:
+  actual=str(Path(torrent.get("save_path","")).resolve()).casefold()
+  intended=str(path.resolve()).casefold()
+  return bool(torrent.get("save_path")) and actual == intended
+ except (OSError,ValueError):return False
+
 def cycle(page,s,c,state):
  items=collect_top_pages(page,c)
- log(f"Érvényes torrentek: {len(items)} (DLs szerint rendezve).")
- if not items:raise RuntimeError("Üres/hibás lista: sem hozzáadás, sem törlés nem történik.")
- # Csak akkor törlünk, ha valóban megvan a teljes top50, és nem egyetlen lap töredéke.
- valid_for_delete=(len(items)>=max(50,int(c["minimum_valid_rows_for_deletion"]))
-                    and int(c["top_count"])>=50)
+ limit=int(c["max_managed_torrents"])
+ log(f"Legtöbbet seedelt lista: {len(items)}/{limit} elem.")
+ if not items:raise RuntimeError("Üres/hibás lista: nem történik módosítás.")
+ valid_for_delete=len(items)>=limit and len({it["id"] for it in items})==len(items)
  top_ids={x["id"] for x in items}
  existing=qb_torrents(s,c)
- hashes={x.get("hash","").lower() for x in existing}
+ by_hash={x.get("hash","").casefold():x for x in existing if x.get("hash")}
  names={x.get("name","").casefold() for x in existing}
- path=target_path(s,c)
- used=disk_percent(path)
- maximum=int(c.get("max_managed_torrents",50))
+ target=target_path(s,c)
+ used=disk_percent(target)
+ maximum=limit
  total=len(existing)
- log(f"qBittorrent: {total} torrent | maximális összes torrent: {maximum}")
- log(f"Tárhely: {used:.1f}% | limit: {c['max_disk_usage_percent']}%")
- log(f"Üzemmód: próbaüzem={c['dry_run']}, hozzáadás engedélyezve={c['enable_additions']}")
- if c["dry_run"] or not c["enable_additions"]:
-  log("FIGYELEM: A hozzáadás ki van kapcsolva. A Beállításokban kapcsold ki a Próbaüzemet és engedélyezd az új torrenteket.")
+ mode=c["mode"]
+ if mode!="full" and any(isinstance(rec,dict) and rec.get("missing_scans",0) for rec in state.values()):
+  for rec in state.values():
+   if isinstance(rec,dict):rec["missing_scans"]=0
+  write_json(STATE,state)
+ log(f"qBittorrent: {total}/{maximum} torrent | tárhely: {used:.1f}% / {c['max_disk_usage_percent']}% | mód: {mode}")
+
+ # Biztonságos törlés: teljes toplista + két EGYMÁST KÖVETŐ sikeres
+ # kör + hash + név + célmappa + nincs megosztott tartalomútvonal.
+ # Másik, kézzel hozzáadott torrentet soha nem törlünk.
+ if valid_for_delete:
+  for tid,rec in list(state.items()):
+   if not isinstance(rec,dict):continue
+   if tid in top_ids:
+    if rec.get("missing_scans",0):
+     rec["missing_scans"]=0
+     write_json(STATE,state)
+    continue
+   torrent=by_hash.get(str(rec.get("hash","")).casefold())
+   if not torrent or not _has_owned_torrent(rec,torrent):
+    continue
+   if not _in_target_folder(torrent,target):
+    log(f"Törlés kihagyva (eltérő mentési mappa): {rec.get('name',tid)}")
+    continue
+   content=torrent.get("content_path","")
+   if content and any(x.get("hash")!=torrent.get("hash") and x.get("content_path")==content for x in existing):
+    log(f"Törlés kihagyva (megosztott tartalom): {rec.get('name',tid)}")
+    continue
+   if mode=="dry":
+    log(f"[PRÓBA] Eltávolítaná a fájlokkal együtt: {rec.get('name',tid)}")
+    continue
+   if mode!="full":
+    continue
+   streak=int(rec.get("missing_scans",0))+1
+   rec["missing_scans"]=streak
+   write_json(STATE,state)
+   if streak>=2:
+    try:
+     delete_owned(s,c,rec["hash"])
+     # Az API választ követően győződjünk meg az eltávolításról.
+     if rec["hash"].casefold() in {x.get("hash","").casefold() for x in qb_torrents(s,c)}:
+      log(f"Törlési válasz érkezett, de a torrent még létezik: {rec.get('name',tid)}")
+      continue
+     del state[tid]
+     write_json(STATE,state)
+     log(f"Eltávolítva: {rec.get('name',tid)}")
+     existing=qb_torrents(s,c)
+     total=len(existing)
+    except Exception as exc:
+     log(f"Törlési hiba: {rec.get('name',tid)}: {exc}")
+   elif mode=="full":
+    log(f"Törlés előkészítve (megerősítés a következő körben): {rec.get('name',tid)}")
+ else:
+  # Hiányos toplista nem tekinthető megszakítás nélküli bizonyítéknak.
+  for rec in state.values():
+   if isinstance(rec,dict):rec["missing_scans"]=0
+  write_json(STATE,state)
+  log("Törlés tiltva: a kívánt hosszúságú, hiánytalan toplista nem igazolható.")
+
+ # A rangsorban szereplő torrentek közül kizárólag a megadott méretűek kerülhetnek be.
+ # A méretet a valódi .torrent metainfóból vizsgáljuk, nem a webes sor szövegéből.
+ hashes={x.get("hash","").casefold() for x in existing}
+ names={x.get("name","").casefold() for x in existing}
  for item in items:
   ident=item["id"]
-  owned=state.get(ident,{})
-  if owned.get("hash","").lower() in hashes and owned.get("hash"):
+  rec=state.get(ident,{})
+  if isinstance(rec,dict) and rec.get("hash","").casefold() in hashes and rec.get("hash"):
    continue
   if item["name"].casefold() in names:
-   log(f"Már létezik név alapján: {item['name']}")
+   log(f"Már létezik: {item['name']}")
    continue
-  # A darabszám a qBittorrent TELJES torrentlistájára vonatkozik.
-  # Az új hozzáadásokat is beleszámoljuk, nem csak a nyilvántartottakat.
   if total>=maximum:
-   log(f"Darabszámkorlát elérve: {total}/{maximum}; ebben a körben nincs több hozzáadás.")
+   log(f"Darabszámkorlát elérve: {total}/{maximum}")
    break
-  if used>=float(c["max_disk_usage_percent"]):
-   log("A tárhely elérte a korlátot; nincs új hozzáadás.")
+  used=disk_percent(target)
+  if used>=int(c["max_disk_usage_percent"]):
+   log("Tárhelykorlát elérve; nincs több új torrent.")
    break
-  if c["dry_run"] or not c["enable_additions"]:
-   log(f"[PRÓBA - NEM TÖRTÉNT HOZZÁADÁS] {item['name']} (DLs {item['dls']})")
-   continue
   try:
    data=get_torrent_file(page,item)
-   log("Célmappa: "+c["qb_save_path"])
+   size=torrent_size(data)
+   if not allowed_size(size,c):
+    log(f"Méretkorlát miatt kihagyva: {item['name']} ({size / 1024**3:.2f} GiB)")
+    continue
+   disk=shutil.disk_usage(target)
+   projected=(disk.used+size)/disk.total*100
+   if size>disk.free or projected>int(c["max_disk_usage_percent"]):
+    log(f"Tárhelykorlát miatt kihagyva: {item['name']} (várható telítettség {projected:.1f}%)")
+    continue
+   if mode=="dry":
+    log(f"[PRÓBA] Letöltené: {item['name']} ({size / 1024**3:.2f} GiB; seederek: {item['seeders']})")
+    continue
    status,h=add(s,c,data,item["name"])
-   if status=="accepted":
-    # Az API sikerjelzését csak a qBittorrent listájában való megjelenés
-    # után tekintjük igazolt hozzáadásnak.
-    verified=None
-    for attempt in range(5):
-     refreshed=qb_torrents(s,c)
-     verified=next((x for x in refreshed
-                    if (h and x.get("hash","").lower()==str(h).lower())
-                    or x.get("name","").casefold()==item["name"].casefold()),None)
-     if verified:break
-     time.sleep(1)
-    if not verified:
-     log(f"Hozzáadási válasz érkezett, de a torrent nem ellenőrizhető a qBittorrentben: {item['name']}")
-     # A következő ciklus majd ismét ellenőrzi, nem növeljük tévesen a számlálót.
-     continue
-    real_hash=verified.get("hash","")
-    state[ident]={"name":item["name"],"hash":real_hash,"added_at":int(time.time())}
-    write_json(STATE,state)
-    existing=refreshed
-    total=len(existing)
-    hashes={x.get("hash","").lower() for x in existing}
-    names={x.get("name","").casefold() for x in existing}
-    log(f"Hozzáadva és ellenőrizve: {item['name']} | {total}/{maximum}")
-   else:
+   if status!="accepted":
     log(f"Nem igazolt hozzáadás ({status}): {item['name']}")
-  except Exception as e:
-   log(f"Hozzáadási hiba: {item['name']}: {e}")
-  used=disk_percent(path)
- # NEM törölünk ismeretlen torrentet, és a lista 50-nél kevesebb eleme esetén sem.
- if not valid_for_delete:
-  log("Törlés tiltva ebben a körben: nincs igazolt, teljes 50 elemű lista.")
- elif c["enable_deletions"]:
-  for tid,rec in list(state.items()):
-   if tid in top_ids:continue
-   h=rec.get("hash","").lower()
-   if not h or h not in hashes:
-    log(f"Törlés kihagyva (nem igazolt torrentazonosító): {tid}")
     continue
-   if c["dry_run"]:
-    log(f"[PRÓBA] Törlés: {rec.get('name',tid)}")
+   verified=None
+   for _ in range(5):
+    refreshed=qb_torrents(s,c)
+    verified=next((x for x in refreshed if
+                   (h and x.get("hash","").casefold()==str(h).casefold()) or
+                   (x.get("name","").casefold()==item["name"].casefold() and
+                    x.get("hash","").casefold() not in hashes)),None)
+    if verified:break
+    time.sleep(1)
+   if not verified:
+    log(f"A torrent hozzáadása még nem ellenőrizhető: {item['name']}")
     continue
-   try:
-    delete_owned(s,c,h)
-    del state[tid]
-    write_json(STATE,state)
-    log(f"Eltávolítva: {rec.get('name',tid)} (fájlok törlése: {c['delete_files']})")
-   except Exception as e:log(f"Törlési hiba: {tid}: {e}")
+   state[ident]={"name":verified.get("name",item["name"]),"hash":verified.get("hash",""),
+                 "added_at":int(time.time()), "missing_scans":0}
+   write_json(STATE,state)
+   existing=refreshed
+   total=len(existing)
+   hashes={x.get("hash","").casefold() for x in existing}
+   names={x.get("name","").casefold() for x in existing}
+   log(f"Letöltve: {item['name']}")
+  except Exception as exc:
+   log(f"Hozzáadási hiba: {item['name']}: {exc}")
+
 def main():
  # Közvetlen TorrentMotor.exe indításnál is helyes böngészőmappát keressünk.
  browser_dir = find_playwright_browsers()
@@ -319,7 +364,15 @@ def main():
  logging.basicConfig(filename=LOG,level=logging.INFO,
                      format="%(asctime)s %(message)s",encoding="utf-8")
  c=config()
- s=qb_login(c)
+ s=None
+ for retry in range(12):
+  try:
+   s=qb_login(c)
+   break
+  except requests.RequestException as exc:
+   if retry==11:raise
+   log(f"Várakozás a qBittorrentre ({retry+1}/12): {exc}")
+   time.sleep(3)
  state=read_json(STATE,{})
  with sync_playwright() as p:
   context=p.chromium.launch_persistent_context(str(PROFILE),headless=bool(c["headless"]))
@@ -330,7 +383,11 @@ def main():
     try:
      wait_for_bithumen_login(page,c)
      cycle(page,s,c,state)
-    except Exception as e:log(f"Ellenőrzési hiba (ebben a körben nincs törlés): {e}")
+    except Exception as e:
+     for rec in state.values():
+      if isinstance(rec,dict):rec["missing_scans"]=0
+     write_json(STATE,state)
+     log(f"Ellenőrzési hiba (ebben a körben nincs törlés): {e}")
     log(f"Következő ellenőrzés {c['check_minutes']} perc múlva.")
     time.sleep(max(1,int(c["check_minutes"]))*60)
   except KeyboardInterrupt:log("Leállítva.")

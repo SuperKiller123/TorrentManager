@@ -1,5 +1,5 @@
 #define MyAppName "Torrent Manager"
-#define MyAppVersion "0.3.0"
+#define MyAppVersion "0.4.0"
 #define MyAppExeName "TorrentManager.exe"
 
 [Setup]
@@ -10,7 +10,7 @@ AppPublisher=Torrent Manager Project
 DefaultDirName={localappdata}\Programs\Torrent Manager
 DefaultGroupName=Torrent Manager
 OutputDir=dist\installer
-OutputBaseFilename=TorrentManager-Setup-v0.3.0
+OutputBaseFilename=TorrentManager-Setup-v0.4.0
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
