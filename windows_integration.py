@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Felhasználónkénti Windows-indítás és opcionális qBittorrent indítás."""
+"""A régi Windows-indítás eltávolítása és qBittorrent háttérindítás."""
 import os
 import shutil
 import subprocess
@@ -24,6 +24,10 @@ def set_windows_startup(enabled):
             try: winreg.DeleteValue(key, RUN_NAME)
             except FileNotFoundError: pass
 
+def remove_legacy_windows_startup():
+    """v0.4-ben engedélyezett saját automatikus indítás eltávolítása."""
+    set_windows_startup(False)
+
 def find_qbittorrent():
     choices = [shutil.which("qbittorrent.exe")]
     for variable in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
@@ -44,7 +48,13 @@ def launch_qbittorrent():
     exe = find_qbittorrent()
     if not exe:
         raise FileNotFoundError("A qBittorrent.exe nem található a szokásos telepítési helyeken.")
+    # A qBittorrent nem minden verziója támogat --minimized kapcsolót.
+    # A Windows indítási ablakállapotával indítjuk; a tálcára rejtéshez
+    # a qBittorrent saját "Start minimized" / "Minimize to tray" beállítása kell.
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = 7  # SW_SHOWMINNOACTIVE
     subprocess.Popen([exe], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, close_fds=True,
+                     stderr=subprocess.DEVNULL, close_fds=True, startupinfo=startupinfo,
                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     return True

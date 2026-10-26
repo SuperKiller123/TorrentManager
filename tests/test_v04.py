@@ -27,7 +27,7 @@ class SettingsPolicyTests(unittest.TestCase):
             'max_disk_usage_percent':70.0, 'github_repository':''})
         self.assertEqual(migrated['mode'],'add')
         self.assertEqual(migrated['max_disk_usage_percent'],70)
-        self.assertEqual(migrated['github_repository'],'SuperKiller123/TorrentManager')
+        self.assertNotIn('github_repository',migrated)
         for obsolete in ('browse_url','top_count','enable_additions','delete_files'):
             self.assertNotIn(obsolete,migrated)
         self.assertEqual(policy.normalize_settings({'dry_run':False,'enable_additions':True,
@@ -36,10 +36,10 @@ class SettingsPolicyTests(unittest.TestCase):
         self.assertEqual(policy.validate_settings({'max_disk_usage_percent':'71'})['max_disk_usage_percent'],71)
         for bad in ('70.5','70.0','test'):
             with self.assertRaises(ValueError):policy.validate_settings({'max_disk_usage_percent':bad})
-        with self.assertRaises(ValueError):policy.validate_settings({'min_size_gib':10,'max_size_gib':1})
-        self.assertFalse(policy.allowed_size(5*1024**3, {'min_size_gib':10,'max_size_gib':0}))
-        self.assertTrue(policy.allowed_size(15*1024**3, {'min_size_gib':10,'max_size_gib':20}))
-        self.assertFalse(policy.allowed_size(30*1024**3, {'min_size_gib':10,'max_size_gib':20}))
+        with self.assertRaises(ValueError):policy.validate_settings({'min_size_gb':10,'max_size_gb':1})
+        self.assertFalse(policy.allowed_size(5*10**9, {'min_size_gb':'10','max_size_gb':''}))
+        self.assertTrue(policy.allowed_size(15*10**9, {'min_size_gb':'10','max_size_gb':'20'}))
+        self.assertFalse(policy.allowed_size(30*10**9, {'min_size_gb':'10','max_size_gb':'20'}))
 
 class MetainfoTests(unittest.TestCase):
     def test_single_file(self):

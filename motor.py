@@ -317,7 +317,7 @@ def cycle(page,s,c,state):
    data=get_torrent_file(page,item)
    size=torrent_size(data)
    if not allowed_size(size,c):
-    log(f"Méretkorlát miatt kihagyva: {item['name']} ({size / 1024**3:.2f} GiB)")
+    log(f"Méretkorlát miatt kihagyva: {item['name']} ({size / 1000**3:.2f} GB)")
     continue
    disk=shutil.disk_usage(target)
    projected=(disk.used+size)/disk.total*100
@@ -325,7 +325,7 @@ def cycle(page,s,c,state):
     log(f"Tárhelykorlát miatt kihagyva: {item['name']} (várható telítettség {projected:.1f}%)")
     continue
    if mode=="dry":
-    log(f"[PRÓBA] Letöltené: {item['name']} ({size / 1024**3:.2f} GiB; seederek: {item['seeders']})")
+    log(f"[PRÓBA] Letöltené: {item['name']} ({size / 1000**3:.2f} GB; seederek: {item['seeders']})")
     continue
    status,h=add(s,c,data,item["name"])
    if status!="accepted":

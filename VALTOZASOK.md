@@ -1,13 +1,12 @@
-# v0.4.0 – Változások
+# Torrent Manager v0.5.0 – változások
 
-- Áttérés a fix BitHuMen `sort=seeders&d=DESC` toplistára.
-- Toplista elemszám = összes qBittorrent torrentszámkorlát; nem szerkeszthető URL és külön elemszám.
-- Mentés gomb csak eltérésnél aktív; egyszerűbb beállítások.
-- Három egymást kizáró üzemmód; törlés esetén qBittorrent torrent + fájlok együtt.
-- Törlési védelem: saját rekord hash/név, azonos mentési mappa, két teljes ellenőrzés, hiányos lista esetén blokkolás.
-- Opcionális indítás Windows bejelentkezéskor és qBittorrent indítása.
-- Min/max torrentméret GiB metainfo alapján; várható tárhely-telítettség ellenőrzése.
-- Kezdőlap részletesebb, valós qBittorrent-állapot alapú számlálással; rövid műveleti naplóval.
-- Nyilvános `SuperKiller123/TorrentManager` GitHub Releases tároló előbeállítása.
-- GitHub Actions modern Node.js-kompatibilis actions verziókkal; build automatikusan main push-ra.
-- CPU-hőmérséklet-figyelés **nincs**, a korábbi ötletet teljesen elvetettük.
+- Áttervezett, kompakt Kezdőlap: Indítás/Leállítás, tárhely, üzemmód, korlátok, legutóbbi események; felesleges számlálók és gyorslinkek nélkül.
+- Beállítások: Mutatás/Elrejtés jelszógomb, „Torrentek száma (darab)”, üres méretmezők, valódi decimális GB.
+- Régi GiB-korlátok pontos migrációja SI GB-ba.
+- qBittorrent automatikus, lehetőség szerint minimalizált indítása; Windows-autostart kapcsolók eltávolítása és korábbi Run-bejegyzés takarítása.
+- Napló: magyar karaktereknek megfelelő Segoe UI, UTF-8 kezelés, felesleges státuszjelzők nélkül.
+- Frissítések: rögzített GitHub tároló, kétgombos frissítési oldal, programismertető.
+- Új külön frissítési segéd, csendes Inno Setup, korábbi telepítési beállítások megőrzése, automatikus újraindítás (csak sikeres telepítés után).
+- Törlésvédelmi ellenőrzések, motor és qBittorrent-kezelési működés megőrizve.
+
+A Windows UAC-megerősítés nem kerülhető meg. A v0.4-ről v0.5-re váltásnál még a v0.4 frissítési rendszer működik; az új csendes frissítő a v0.5-ből induló következő kiadásnál használható.

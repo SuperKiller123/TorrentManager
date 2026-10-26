@@ -1,5 +1,5 @@
 #define MyAppName "Torrent Manager"
-#define MyAppVersion "0.4.0"
+#define MyAppVersion "0.5.0"
 #define MyAppExeName "TorrentManager.exe"
 
 [Setup]
@@ -10,7 +10,7 @@ AppPublisher=Torrent Manager Project
 DefaultDirName={localappdata}\Programs\Torrent Manager
 DefaultGroupName=Torrent Manager
 OutputDir=dist\installer
-OutputBaseFilename=TorrentManager-Setup-v0.4.0
+OutputBaseFilename=TorrentManager-Setup-v0.5.0
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -19,6 +19,9 @@ ArchitecturesAllowed=x64compatible
 UninstallDisplayIcon={app}\TorrentManager.exe
 CloseApplications=yes
 RestartApplications=no
+UsePreviousAppDir=yes
+UsePreviousGroup=yes
+UsePreviousTasks=yes
 
 [Languages]
 Name: "hungarian"; MessagesFile: "compiler:Languages\Hungarian.isl"
