@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Torrent Manager 0.5 – letisztult, magyar nyelvű Windows kezelőfelület."""
+"""Torrent Manager v0.6 – modern, DPI-aware Windows UI for the safe torrent engine."""
 import json
 import os
 import queue
@@ -7,714 +7,1024 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
+import webbrowser
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from paths import BASE, SETTINGS, STATE, DATA_DIR, LOG, migrate_old_data, find_playwright_browsers
-from updater import VERSION, check_latest, download_installer, UpdateError
-from policy import DEFAULT, MODES, TOP_URL, GITHUB_REPO, normalize_settings, validate_settings
-from windows_integration import remove_legacy_windows_startup, launch_qbittorrent
+from paths import BASE, SETTINGS, DATA_DIR, LOG, migrate_old_data, find_playwright_browsers
+from policy import GITHUB_REPO, normalize_settings, validate_settings
+from updater import VERSION, list_releases, download_installer, UpdateError, parse_version
+from localization import tr, LANGUAGES
+from webui import check_webui
+from windows_integration import remove_legacy_windows_startup, launch_qbittorrent, apply_windows_titlebar
+
+DARK = dict(bg='#0C1220', sidebar='#111B2B', panel='#151F31', panel_hi='#1D2B42',
+            input='#0F1A2B', text='#EEF5FF', muted='#99ADC4', line='#29374C',
+            blue='#528CF4', bluehover='#4078DF', green='#3CD6AE', amber='#FFBF69',
+            red='#FF7588', white='#FFFFFF')
+LIGHT = dict(bg='#F1F5FB', sidebar='#E4EAF4', panel='#FFFFFF', panel_hi='#DAE5F5',
+             input='#F3F7FC', text='#162339', muted='#546A83', line='#CBD6E6',
+             blue='#316EE5', bluehover='#245CC9', green='#0C9B79', amber='#B27107',
+             red='#D24056', white='#FFFFFF')
+P = dict(DARK)
+FONT = 'Segoe UI' if os.name == 'nt' else 'Noto Sans'
+
 
 def read_settings():
-    if SETTINGS.exists():
-        return normalize_settings(json.loads(SETTINGS.read_text(encoding="utf-8")))
-    return normalize_settings({})
+    try:
+        saved = json.loads(SETTINGS.read_text(encoding='utf-8')) if SETTINGS.exists() else {}
+    except (ValueError, OSError):
+        saved = {}
+    # The installer saves first-install language without overwriting an existing settings.json.
+    if 'language' not in saved and os.name == 'nt':
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\TorrentManager') as key:
+                saved['language'] = winreg.QueryValueEx(key, 'Language')[0]
+        except (OSError, ImportError):
+            pass
+    return normalize_settings(saved)
 
 
-P = {
-    "bg": "#0C1220", "sidebar": "#111B2B", "panel": "#151F31", "panel_hi": "#1B2940",
-    "input": "#0F1A2B", "text": "#EEF5FF", "muted": "#93A4BA", "line": "#29374C",
-    "blue": "#528CF4", "bluehover": "#4078DF", "green": "#3CD6AE", "amber": "#FFBF69",
-    "red": "#FF7588", "white": "#FFFFFF",
-}
-FONT = "Segoe UI"
+def theme_is_dark(theme):
+    if theme != 'system':
+        return theme != 'light'
+    if os.name == 'nt':
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                    r'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize') as key:
+                return not bool(winreg.QueryValueEx(key, 'AppsUseLightTheme')[0])
+        except OSError:
+            return True
+    return True
 
 
 class App:
     def __init__(self, root):
         self.root = root
-        self.proc = None
-        self.events = queue.Queue()
-        self.release = None
-        self.downloading = False
         self.cfg = read_settings()
+        self.events = queue.Queue()
+        self.proc = None
+        self.running = False
+        self.closed = False
+        self.connected = False
+        self.bithumen_ready = False
+        self.connection_message = 'check_qb'
+        self.last_webui_cfg = None
+        self.current_page = None
         self.vars = {}
         self.nav_buttons = {}
         self.sections = {}
-        self.running = False
+        self.log_lines = []
+        self.releases = []
+        self.release_by_version = {}
+        self.downloading = False
+        self.update_message = tk.StringVar(value='')
+        self.stat_disk = tk.StringVar(value='–')
+        self.stat_used = tk.StringVar(value='–')
+        self.home_mode = tk.StringVar(value='')
+        self.home_details = tk.StringVar(value='')
+        self.status = tk.StringVar(value='')
+        self.webui_status = tk.StringVar(value='')
+        self.next_check = tk.StringVar(value='–')
+        self.disk_fraction = 0.0
+        self.disk_target = 0.0
+        self._animating_bar = False
+        self._last_bar_update = 0.0
+        self.last_action_time = time.monotonic()
+        self._load_log_tail()
+        root.title(' ')  # no app version or name in caption: branded sidebar is the title
+        root.geometry('1200x820')
+        root.minsize(880, 630)
+        try:
+            root.state('zoomed')  # maximize into usable work area, not F11 fullscreen
+        except tk.TclError:
+            root.geometry('1200x820')
+        root.bind('<F11>', self.toggle_fullscreen)
+        root.bind_all('<MouseWheel>', self._wheel_active)
+        root.bind_all('<Button-4>', lambda _event: self._wheel_active(None, -3))
+        root.bind_all('<Button-5>', lambda _event: self._wheel_active(None, 3))
+        root.protocol('WM_DELETE_WINDOW', self.close)
+        self._render('dashboard')
+        threading.Thread(target=self._try_start_qb, daemon=True).start()
+        threading.Thread(target=self._remove_old_startup, daemon=True).start()
+        threading.Thread(target=self._webui_loop, daemon=True).start()
+        root.after(120, self.poll)
+        root.after(15000, self._periodic_stats)
+
+    def T(self, key):
+        return tr(self.cfg.get('language', 'hu'), key)
+
+    def toggle_fullscreen(self, _event=None):
+        self.root.attributes('-fullscreen', not bool(self.root.attributes('-fullscreen')))
+        return 'break'  # Escape is intentionally NOT bound to fullscreen
+
+    def _render(self, page):
+        global P
+        dark = theme_is_dark(self.cfg.get('theme', 'dark'))
+        P = dict(DARK if dark else LIGHT)
+        self.root.configure(bg=P['bg'])
+        apply_windows_titlebar(self.root, dark, P['bg'])
+        if hasattr(self, 'sidebar'):
+            self.sidebar.destroy()
+            self.main.destroy()
+        self.vars, self.nav_buttons, self.sections = {}, {}, {}
         self.current_page = None
-        self.status = tk.StringVar(value="Leállítva")
-        self.stat_disk = tk.StringVar(value="–")
-        self.home_details = tk.StringVar(value="")
-        self.update_message = tk.StringVar(value="Ellenőrizd, hogy elérhető-e új kiadás a GitHubon.")
-        root.title(f"Torrent Manager • v{VERSION}")
-        root.geometry("1120x790")
-        root.minsize(900, 650)
-        root.configure(bg=P["bg"])
         self._styles()
         self._structure()
         self._create_pages()
-        self.show_page("dashboard")
-        self._read_last_logs()
+        self.show_page(page)
         self.refresh_stats()
-        threading.Thread(target=self._try_start_qb, daemon=True).start()
-        threading.Thread(target=self._remove_old_startup, daemon=True).start()
-        root.after(150, self.poll)
-        root.after(20000, self._periodic_stats)
-        root.protocol("WM_DELETE_WINDOW", self.close)
+        self._connection_update(self.connected, self.connection_message)
+        self._status(self.running)
+        self._bit_status()
+        self._reload_visible_logs()
+        self._releases_to_combobox()
+        if self.releases:
+            self.latest_value.set(self.releases[0]['version'])
 
     def _styles(self):
         style = ttk.Style(self.root)
         try:
-            style.theme_use("clam")
+            style.theme_use('clam')
         except tk.TclError:
             pass
-        style.configure("Vertical.TScrollbar", troughcolor=P["panel"], background=P["line"], borderwidth=0, arrowcolor=P["muted"])
-        style.configure("TProgressbar", troughcolor=P["input"], background=P["blue"], borderwidth=0)
+        style.configure('TM.TCombobox', fieldbackground=P['input'], background=P['panel_hi'],
+                        foreground=P['text'], arrowcolor=P['text'], bordercolor=P['line'],
+                        lightcolor=P['input'], darkcolor=P['input'], padding=8)
+        style.map('TM.TCombobox', fieldbackground=[('readonly', P['input'])],
+                  foreground=[('readonly', P['text'])])
+        style.configure('TM.Vertical.TScrollbar', background=P['panel_hi'], troughcolor=P['bg'],
+                        arrowcolor=P['muted'], borderwidth=0)
 
-    def _label(self, parent, text="", size=11, color="text", bold=False, **kwargs):
-        return tk.Label(parent, text=text, font=(FONT, size, "bold" if bold else "normal"),
-                        fg=P.get(color, color), bg=parent.cget("bg"), anchor="w", **kwargs)
+    def _label(self, parent, text='', size=10, color='text', bold=False, **kw):
+        return tk.Label(parent, text=text, bg=parent.cget('bg'), fg=P.get(color, color),
+                        font=(FONT, size, 'bold' if bold else 'normal'), anchor='w', **kw)
 
-    def _button(self, parent, text, command, kind="primary", width=None, state="normal"):
-        normal = P["blue"] if kind == "primary" else P["panel_hi"] if kind == "secondary" else P["panel"]
-        active = P["bluehover"] if kind == "primary" else P["line"]
-        b = tk.Button(parent, text=text, command=command, bg=normal if state == "normal" else P["line"], fg=P["white"],
-                      activebackground=active, activeforeground=P["white"],
-                      disabledforeground=P["muted"], relief="flat", bd=0,
-                      cursor="hand2", font=(FONT, 10, "bold"), highlightthickness=0,
-                      padx=19, pady=11, width=width, state=state)
-        b.bind("<Enter>", lambda _e: b.configure(bg=active) if str(b.cget("state")) == "normal" else None)
-        b.bind("<Leave>", lambda _e: b.configure(bg=normal if str(b.cget("state")) == "normal" else P["line"]))
-        return b
+    def _button(self, parent, text, command, kind='primary', small=False, state='normal'):
+        bg = P['blue'] if kind == 'primary' else P['panel_hi'] if kind == 'secondary' else P['panel']
+        fg = P['white'] if kind == 'primary' else P['text']
+        active = P['bluehover'] if kind == 'primary' else P['line']
+        button = tk.Button(parent, text=text, command=command, state=state, bg=bg, fg=fg,
+                           activebackground=active, activeforeground=fg,
+                           disabledforeground=P['muted'], relief='flat', bd=0, highlightthickness=0,
+                           font=(FONT, 9, 'bold'), padx=13 if small else 19,
+                           pady=7 if small else 10, cursor='hand2')
+        button.bind('<Enter>', lambda _e: self._animate_bg(button, active) if button['state'] == 'normal' else None)
+        button.bind('<Leave>', lambda _e: self._animate_bg(button, bg if button['state'] == 'normal' else P['line']))
+        return button
 
-    def _card(self, parent, pad=20):
-        outer = tk.Frame(parent, bg=P["panel"], padx=pad, pady=pad, highlightthickness=1,
-                         highlightbackground=P["line"])
-        return outer
+    def _animate_bg(self, widget, target):
+        """Smooth 120 ms button hover transitions, no permanent high-FPS redraw."""
+        try:
+            current = widget.cget('bg')
+            if not (current.startswith('#') and target.startswith('#')):
+                widget.configure(bg=target)
+                return
+            start = tuple(int(current[i:i+2], 16) for i in (1, 3, 5))
+            end = tuple(int(target[i:i+2], 16) for i in (1, 3, 5))
+            widget._tm_token = getattr(widget, '_tm_token', 0) + 1
+            token = widget._tm_token
+            def step(index):
+                if not widget.winfo_exists() or widget._tm_token != token:
+                    return
+                amount = 1 - (1 - index/8)**2
+                rgb = [round(a+(b-a)*amount) for a, b in zip(start, end)]
+                widget.configure(bg='#' + ''.join(f'{v:02x}' for v in rgb))
+                if index < 8:
+                    self.root.after(15, lambda: step(index+1))
+            step(1)
+        except (tk.TclError, AttributeError, ValueError):
+            pass
+
+    def _card(self, parent, pad=15):
+        return tk.Frame(parent, bg=P['panel'], padx=pad, pady=pad,
+                        highlightthickness=1, highlightbackground=P['line'])
 
     def _structure(self):
-        self.sidebar = tk.Frame(self.root, bg=P["sidebar"], width=230)
-        self.sidebar.pack(side="left", fill="y")
+        self.sidebar = tk.Frame(self.root, bg=P['sidebar'], width=225)
+        self.sidebar.pack(side='left', fill='y')
         self.sidebar.pack_propagate(False)
-        brand = tk.Frame(self.sidebar, bg=P["sidebar"])
-        brand.pack(fill="x", padx=22, pady=(29, 36))
-        tk.Label(brand, text="◈", bg=P["sidebar"], fg=P["green"], font=(FONT, 29, "bold")).pack(side="left", padx=(0, 12))
-        titles = tk.Frame(brand, bg=P["sidebar"])
-        titles.pack(side="left")
-        self._label(titles, "TORRENT", 14, bold=True).pack(anchor="w")
-        self._label(titles, "MANAGER  /  0.5", 9, color="muted", bold=True).pack(anchor="w")
-        self._label(self.sidebar, "MENÜ", 9, color="muted", bold=True).pack(anchor="w", padx=26, pady=(0, 11))
-        for key, text in (
-            ("dashboard", "▦    Kezdőlap"), ("settings", "⚙    Beállítások"),
-            ("activity", "≡    Napló és események"), ("updates", "↻    Frissítések"),
-        ):
-            b = tk.Button(self.sidebar, text=text, command=lambda name=key: self.show_page(name),
-                          anchor="w", bg=P["sidebar"], fg=P["muted"], bd=0, relief="flat",
-                          font=(FONT, 11), padx=25, pady=16, activeforeground=P["white"],
-                          activebackground=P["panel_hi"], cursor="hand2", highlightthickness=0)
-            b.pack(fill="x", pady=2, padx=9)
+        brand = tk.Frame(self.sidebar, bg=P['sidebar'])
+        brand.pack(fill='x', padx=17, pady=(25, 29))
+        icon = Path(getattr(sys, '_MEIPASS', BASE)) / 'assets' / 'app_icon.png'
+        try:
+            self.brand_icon = tk.PhotoImage(file=str(icon))
+            tk.Label(brand, image=self.brand_icon, bg=P['sidebar']).pack(side='left', padx=(0, 10))
+        except tk.TclError:
+            tk.Label(brand, text='◈', bg=P['sidebar'], fg=P['green'],
+                     font=(FONT, 25)).pack(side='left', padx=(0, 8))
+        self._label(brand, 'Torrent Manager', 11, bold=True).pack(side='left')
+        for key, icon_txt in [('dashboard', '▦'), ('settings', '⚙'), ('activity', '≡'), ('updates', '↻')]:
+            title_key = 'logs' if key == 'activity' else 'home' if key == 'dashboard' else key
+            b = tk.Button(self.sidebar, text=f'{icon_txt}   {self.T(title_key)}',
+                          command=lambda p=key: self.show_page(p),
+                          bg=P['sidebar'], fg=P['muted'], activeforeground=P['text'],
+                          activebackground=P['panel_hi'], font=(FONT, 10),
+                          relief='flat', bd=0, padx=17, pady=15, anchor='w',
+                          highlightthickness=0, cursor='hand2')
+            b.pack(fill='x', padx=8, pady=2)
             self.nav_buttons[key] = b
-        tk.Frame(self.sidebar, bg=P["sidebar"]).pack(fill="both", expand=True)
-        bottom = tk.Frame(self.sidebar, bg=P["sidebar"])
-        bottom.pack(fill="x", padx=22, pady=(0, 26))
-        self._label(bottom, "SEEDEREK SZERINT", 9, color="green", bold=True).pack(anchor="w", pady=(0, 7))
-        self._label(bottom, "Biztonságos próbaüzem az alapérték.", 9, color="muted").pack(anchor="w")
-        self._label(bottom, "A bezárás leállítja a motort.", 9, color="muted").pack(anchor="w")
-
-        main = tk.Frame(self.root, bg=P["bg"])
-        main.pack(side="left", fill="both", expand=True)
-        top = tk.Frame(main, bg=P["bg"], height=90)
-        top.pack(fill="x", padx=29, pady=(24, 12))
-        self.top_frame = top
-        self.heading = self._label(top, "", 23, bold=True)
-        self.heading.pack(side="left", anchor="center")
-        self.body = tk.Frame(main, bg=P["bg"])
-        self.body.pack(fill="both", expand=True, padx=29, pady=(0, 23))
+        self.main = tk.Frame(self.root, bg=P['bg'])
+        self.main.pack(side='left', fill='both', expand=True)
+        self.body = tk.Frame(self.main, bg=P['bg'])
+        self.body.pack(fill='both', expand=True, padx=24, pady=22)
 
     def _create_pages(self):
-        for name in ("dashboard", "settings", "activity", "updates"):
-            self.sections[name] = tk.Frame(self.body, bg=P["bg"])
-        self._dashboard(self.sections["dashboard"])
-        self._settings(self.sections["settings"])
-        self._activity(self.sections["activity"])
-        self._updates(self.sections["updates"])
+        for page in ('dashboard', 'settings', 'activity', 'updates'):
+            self.sections[page] = tk.Frame(self.body, bg=P['bg'])
+        self._dashboard(self.sections['dashboard'])
+        self._settings(self.sections['settings'])
+        self._activity(self.sections['activity'])
+        self._updates(self.sections['updates'])
 
     def show_page(self, page):
-        if page == self.current_page:
+        if self.current_page == page:
             return
         if self.current_page:
             self.sections[self.current_page].pack_forget()
         self.current_page = page
-        self.sections[page].pack(fill="both", expand=True)
-        if page == "dashboard":
-            self.top_frame.pack_forget()
-        elif not self.top_frame.winfo_manager():
-            self.top_frame.pack(fill="x", padx=29, pady=(24, 12), before=self.body)
-        self.heading.configure(text={"dashboard": "", "settings": "Beállítások",
-                                     "activity": "Napló és események", "updates": "Frissítések"}[page])
+        self.sections[page].pack(fill='both', expand=True)
         for name, button in self.nav_buttons.items():
-            active = name == page
-            button.configure(bg=P["panel_hi"] if active else P["sidebar"],
-                             fg=P["white"] if active else P["muted"],
-                             font=(FONT, 11, "bold" if active else "normal"))
-        if page == "dashboard":
+            selected = name == page
+            button.configure(bg=P['panel_hi'] if selected else P['sidebar'],
+                             fg=P['text'] if selected else P['muted'],
+                             font=(FONT, 10, 'bold' if selected else 'normal'))
+        if page == 'settings':
+            self.root.after_idle(lambda: self.settings_canvas.yview_moveto(0)
+                                 if self.current_page == 'settings' else None)
+        if page == 'dashboard':
             self.refresh_stats()
 
-    def _dashboard(self, page):
-        hero = self._card(page, 17)
-        hero.pack(fill="x", pady=(0, 14))
-        self._label(hero, "Legtöbbet seedelt torrentek kezelése", 17, bold=True).pack(anchor="w")
-        self._label(hero, "A BitHuMen toplistájának figyelése és a torrentek biztonságos kezelése.",
-                    10, "muted").pack(anchor="w", pady=(4, 13))
-        controls = tk.Frame(hero, bg=P["panel"])
-        controls.pack(anchor="w")
-        self.start_btn = self._button(controls, "Indítás", self.start, width=13)
-        self.start_btn.pack(side="left", padx=(0, 10))
-        self.stop_btn = self._button(controls, "Leállítás", self.stop, "secondary", width=13, state="disabled")
-        self.stop_btn.pack(side="left")
-        self.home_status = self._label(hero, "●  Leállítva", 10, "muted", bold=True)
-        self.home_status.pack(anchor="w", pady=(12, 0))
-
-        overview = tk.Frame(page, bg=P["bg"])
-        overview.pack(fill="x", pady=(0, 14))
-        overview.columnconfigure(0, weight=1, uniform="overview")
-        overview.columnconfigure(1, weight=1, uniform="overview")
-        disk = self._card(overview, 18)
-        disk.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
-        self._label(disk, "Tárhelyhasználat", 13, bold=True).pack(anchor="w")
-        tk.Label(disk, textvariable=self.stat_disk, fg=P["white"], bg=P["panel"],
-                 font=(FONT, 25, "bold"), anchor="w").pack(anchor="w", pady=(8, 6))
-        self.disk_subtitle = self._label(disk, "", 10, "muted")
-        self.disk_subtitle.pack(anchor="w", pady=(0, 8))
-        barbg = tk.Frame(disk, bg=P["input"], height=8)
-        barbg.pack(fill="x")
-        barbg.pack_propagate(False)
-        self.disk_bar = tk.Frame(barbg, bg=P["green"], width=1, height=8)
-        self.disk_bar.place(x=0, y=0, relheight=1, relwidth=0)
-        modecard = self._card(overview, 18)
-        modecard.grid(row=0, column=1, sticky="nsew", padx=(7, 0))
-        self._label(modecard, "Működési mód", 13, bold=True).pack(anchor="w")
-        self.home_mode = tk.StringVar(value="Próbaüzem")
-        tk.Label(modecard, textvariable=self.home_mode, fg=P["white"], bg=P["panel"],
-                 font=(FONT, 19, "bold"), anchor="w").pack(anchor="w", pady=(13, 6))
-        self._label(modecard, "A tényleges műveleteket a naplóban követheted.", 9, "muted").pack(anchor="w")
-
-        details = self._card(page, 17)
-        details.pack(fill="x", pady=(0, 14))
-        self._label(details, "Aktuális korlátok", 13, bold=True).pack(anchor="w", pady=(0, 8))
-        tk.Label(details, textvariable=self.home_details, bg=P["panel"], fg=P["text"],
-                 font=(FONT, 11), justify="left", anchor="w").pack(fill="x")
-        recent = self._card(page, 16)
-        recent.pack(fill="both", expand=True)
-        self._label(recent, "Legutóbbi műveletek", 13, bold=True).pack(anchor="w", pady=(0, 8))
-        self.preview = tk.Text(recent, bg=P["input"], fg=P["text"], bd=0,
-                               selectbackground=P["panel_hi"], highlightthickness=0,
-                               font=(FONT, 10), height=7, wrap="word", state="disabled")
-        self.preview.pack(fill="both", expand=True)
-
     def _scroll_page(self, parent):
-        canvas = tk.Canvas(parent, bg=P["bg"], highlightthickness=0)
-        scrollbar = tk.Scrollbar(parent, orient="vertical", command=canvas.yview,
-                                 bg=P["panel_hi"], troughcolor=P["input"],
-                                 activebackground=P["blue"], relief="flat", bd=0,
-                                 highlightthickness=0)
-        canvas.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-        canvas.pack(side="left", fill="both", expand=True)
-        interior = tk.Frame(canvas, bg=P["bg"])
-        win = canvas.create_window((0, 0), window=interior, anchor="nw")
-        interior.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(win, width=event.width))
-        canvas.bind_all("<MouseWheel>", lambda event: canvas.yview_scroll(-1 * int(event.delta / 120), "units")
-                        if self.current_page == "settings" else None)
-        canvas.bind_all("<Button-4>", lambda _event: canvas.yview_scroll(-3, "units")
-                        if self.current_page == "settings" else None)
-        canvas.bind_all("<Button-5>", lambda _event: canvas.yview_scroll(3, "units")
-                        if self.current_page == "settings" else None)
-        return interior
+        frame = tk.Frame(parent, bg=P['bg'])
+        frame.pack(fill='both', expand=True)
+        canvas = tk.Canvas(frame, bg=P['bg'], highlightthickness=0, bd=0)
+        sb = ttk.Scrollbar(frame, orient='vertical', command=canvas.yview,
+                           style='TM.Vertical.TScrollbar')
+        sb.pack(side='right', fill='y')
+        canvas.pack(side='left', fill='both', expand=True)
+        canvas.configure(yscrollcommand=sb.set)
+        interior = tk.Frame(canvas, bg=P['bg'])
+        win = canvas.create_window((0, 0), window=interior, anchor='nw')
+        interior.bind('<Configure>', lambda _: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.bind('<Configure>', lambda event: canvas.itemconfigure(win, width=event.width))
+        return interior, canvas
 
-    def _input(self, parent, key, label, row, secret=False, folder=False, hint=None):
-        wrap = tk.Frame(parent, bg=P["panel"])
-        wrap.grid(row=row, column=0, sticky="ew", pady=(0, 14))
-        self._label(wrap, label, 10, bold=True).pack(anchor="w", pady=(0, 6))
-        entryrow = tk.Frame(wrap, bg=P["panel"])
-        entryrow.pack(fill="x")
-        var = tk.StringVar(value=str(self.cfg.get(key, "")))
-        self.vars[key] = var
-        entry = tk.Entry(entryrow, textvariable=var, bg=P["input"], fg=P["white"],
-                         insertbackground=P["white"], relief="flat", bd=0,
-                         font=(FONT, 11), highlightthickness=1,
-                         highlightbackground=P["line"], highlightcolor=P["blue"],
-                         show="•" if secret else "")
-        entry.pack(side="left", fill="x", expand=True, ipady=10, ipadx=11)
-        if secret:
-            toggle = self._button(entryrow, "Mutatás", lambda: None, "secondary")
-            def show_hide(e=entry, button=toggle):
-                shown = bool(e.cget("show"))
-                e.configure(show="" if shown else "•")
-                button.configure(text="Elrejtés" if shown else "Mutatás")
-            toggle.configure(command=show_hide)
-            toggle.pack(side="left", padx=(8, 0))
-        if folder:
-            self._button(entryrow, "Tallózás", self.choose_folder, "secondary").pack(side="left", padx=(8, 0))
-        if hint:
-            self._label(wrap, hint, 9, "muted", wraplength=680, justify="left").pack(anchor="w", pady=(6, 0))
-        return entry
+    def _wheel_active(self, event=None, amount=None):
+        canvas = {'dashboard': getattr(self, 'dashboard_canvas', None),
+                  'settings': getattr(self, 'settings_canvas', None),
+                  'updates': getattr(self, 'updates_canvas', None)}.get(self.current_page)
+        if canvas is not None and canvas.winfo_exists():
+            steps = amount if amount is not None else (-int(event.delta / 120) if event.delta else 0)
+            if steps:
+                canvas.yview_scroll(steps, 'units')
 
-    def _group(self, parent, title, subtitle=None):
-        card = self._card(parent, 22)
-        card.pack(fill="x", pady=(0, 16))
-        self._label(card, title, 14, bold=True).pack(anchor="w")
+    def _metric(self, parent, heading, variable, subtitle=''):
+        card = self._card(parent, 13)
+        self._label(card, heading, 9, 'muted').pack(anchor='w')
+        tk.Label(card, textvariable=variable, bg=P['panel'], fg=P['text'],
+                 font=(FONT, 18, 'bold'), anchor='w').pack(anchor='w', pady=(5, 2))
         if subtitle:
-            self._label(card, subtitle, 9, "muted", wraplength=680, justify="left").pack(anchor="w", pady=(4, 14))
-        else:
-            tk.Frame(card, bg=P["panel"], height=14).pack()
-        grid = tk.Frame(card, bg=P["panel"])
-        grid.pack(fill="x")
-        grid.columnconfigure(0, weight=1)
-        return grid
+            self._label(card, subtitle, 9, 'muted').pack(anchor='w')
+        return card
 
-    def _switch(self, parent, label, key, note=None, warning=False):
-        var = tk.BooleanVar(value=bool(self.cfg.get(key, False)))
-        self.vars[key] = var
-        wrapper = tk.Frame(parent, bg=P["panel"])
-        wrapper.pack(fill="x", pady=6)
-        check = tk.Checkbutton(wrapper, text=label, variable=var, bg=P["panel"],
-                               fg=P["white"], activebackground=P["panel"],
-                               activeforeground=P["white"], selectcolor=P["input"],
-                               font=(FONT, 11, "bold" if warning else "normal"),
-                               anchor="w", cursor="hand2")
-        check.pack(anchor="w")
-        if note:
-            self._label(wrapper, note, 9, "amber" if warning else "muted",
-                        wraplength=680, justify="left").pack(anchor="w", padx=25, pady=(0, 4))
+    def _dashboard(self, page):
+        # Dense monitoring surface, with controls deliberately subordinate to metrics.
+        title = tk.Frame(page, bg=P['bg'])
+        title.pack(fill='x', pady=(0, 10))
+        self._label(title, self.T('home'), 22, bold=True).pack(side='left')
+        actions = tk.Frame(title, bg=P['bg'])
+        actions.pack(side='right')
+        self.start_btn = self._button(actions, self.T('start'), self.start, small=True)
+        self.start_btn.pack(side='left', padx=4)
+        self.stop_btn = self._button(actions, self.T('stop'), self.stop, 'secondary', True, 'disabled')
+        self.stop_btn.pack(side='left', padx=4)
+        interior, self.dashboard_canvas = self._scroll_page(page)
+        metrics = tk.Frame(interior, bg=P['bg'])
+        metrics.pack(fill='x', pady=(0, 9))
+        for i in range(4):
+            metrics.columnconfigure(i, weight=1, uniform='metric')
+        self.metric_auto = tk.StringVar()
+        cards = [(self.T('automation'), self.metric_auto), (self.T('space'), self.stat_disk),
+                 (self.T('mode'), self.home_mode), (self.T('connection'), self.webui_status)]
+        for i, (head, var) in enumerate(cards):
+            metric = self._metric(metrics, head, var)
+            if i == 3:
+                for label in metric.winfo_children():
+                    if isinstance(label, tk.Label) and str(label.cget('textvariable')):
+                        label.configure(font=(FONT, 12, 'bold'))
+            metric.grid(row=0, column=i, sticky='nsew', padx=(0, 5) if i < 3 else 0)
+        extra = tk.Frame(interior, bg=P['bg'])
+        extra.pack(fill='x', pady=(0, 9))
+        for i in range(4):
+            extra.columnconfigure(i, weight=1, uniform='extra')
+        self.mini_total = tk.StringVar(value='–')
+        self.mini_interval = tk.StringVar(value='–')
+        self.mini_min = tk.StringVar(value='–')
+        self.mini_max = tk.StringVar(value='–')
+        for i, (title, variable) in enumerate([
+            (self.T('total'), self.mini_total), (self.T('interval'), self.mini_interval),
+            (self.T('minsize'), self.mini_min), (self.T('maxsize'), self.mini_max)]):
+            card = self._card(extra, 11)
+            card.grid(row=0, column=i, sticky='nsew', padx=(0, 5) if i < 3 else 0)
+            self._label(card, title, 9, 'muted').pack(anchor='w')
+            tk.Label(card, textvariable=variable, bg=P['panel'], fg=P['text'],
+                     font=(FONT, 13, 'bold')).pack(anchor='w', pady=(5, 0))
+        disk = self._card(interior)
+        disk.pack(fill='x', pady=(0, 9))
+        dline = tk.Frame(disk, bg=P['panel'])
+        dline.pack(fill='x')
+        self._label(dline, self.T('disk_info'), 11, bold=True).pack(side='left')
+        tk.Label(dline, textvariable=self.stat_used, bg=P['panel'], fg=P['muted'],
+                 font=(FONT, 10)).pack(side='right')
+        self.disk_track = tk.Canvas(disk, height=13, bg=P['panel'], bd=0, highlightthickness=0)
+        self.disk_track.pack(fill='x', pady=(12, 5))
+        self.disk_track.bind('<Configure>', lambda _: self._paint_disk_bar())
+        more = tk.Frame(interior, bg=P['bg'])
+        more.pack(fill='x', pady=(0, 9))
+        for i in range(2):
+            more.columnconfigure(i, weight=1, uniform='more')
+        limits = self._card(more)
+        limits.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
+        self._label(limits, self.T('limits'), 12, bold=True).pack(anchor='w', pady=(0, 8))
+        tk.Label(limits, textvariable=self.home_details, bg=P['panel'], fg=P['text'],
+                 font=(FONT, 10), anchor='nw', justify='left', wraplength=350).pack(fill='both', expand=True)
+        system = self._card(more)
+        system.grid(row=0, column=1, sticky='nsew')
+        self._label(system, self.T('connection'), 12, bold=True).pack(anchor='w', pady=(0, 7))
+        self.qb_indicator = self._label(system, '○  qBittorrent', 10, 'muted')
+        self.qb_indicator.pack(anchor='w', pady=2)
+        self.webui_indicator = self._label(system, '', 10, 'amber')
+        self.webui_indicator.pack(anchor='w', pady=2)
+        self.bit_indicator = self._label(system, '○  BitHuMen', 10, 'muted')
+        self.bit_indicator.pack(anchor='w', pady=2)
+        future = self._card(interior)
+        future.pack(fill='x', pady=(0, 9))
+        row = tk.Frame(future, bg=P['panel'])
+        row.pack(fill='x')
+        self._label(row, self.T('next'), 10, bold=True).pack(side='left')
+        tk.Label(row, textvariable=self.next_check, fg=P['text'], bg=P['panel'],
+                 font=(FONT, 11, 'bold')).pack(side='right')
+        logcard = self._card(interior)
+        logcard.pack(fill='both', expand=True, pady=(0, 9))
+        self._label(logcard, self.T('recent'), 12, bold=True).pack(anchor='w', pady=(0, 8))
+        self.preview = tk.Text(logcard, height=9, bg=P['input'], fg=P['text'], relief='flat',
+                               bd=0, padx=12, pady=11, wrap='word',
+                               font=(FONT, 10), state='disabled')
+        self.preview.pack(fill='both', expand=True)
+
+    def _group(self, parent, title):
+        box = self._card(parent, 18)
+        box.pack(fill='x', pady=(0, 12))
+        self._label(box, title, 12, bold=True).pack(anchor='w', pady=(0, 12))
+        inner = tk.Frame(box, bg=P['panel'])
+        inner.pack(fill='x')
+        inner.columnconfigure(0, weight=1)
+        return inner
+
+    def _input(self, parent, key, title, row, secret=False, browse=False):
+        wrap = tk.Frame(parent, bg=P['panel'])
+        wrap.grid(row=row, column=0, sticky='ew', pady=(0, 11))
+        self._label(wrap, title, 9, bold=True).pack(anchor='w', pady=(0, 5))
+        entryrow = tk.Frame(wrap, bg=P['panel'])
+        entryrow.pack(fill='x')
+        variable = tk.StringVar(value=str(self.cfg.get(key, '')))
+        self.vars[key] = variable
+        entry = tk.Entry(entryrow, textvariable=variable, bg=P['input'], fg=P['text'],
+                         insertbackground=P['text'], relief='flat', bd=0,
+                         font=(FONT, 10), highlightthickness=1,
+                         highlightbackground=P['line'], highlightcolor=P['blue'],
+                         show='•' if secret else '')
+        entry.pack(side='left', fill='x', expand=True, ipady=9, ipadx=8)
+        if secret:
+            btn = self._button(entryrow, self.T('show'), None, 'secondary', True)
+            def toggle():
+                visible = bool(entry.cget('show'))
+                entry.configure(show='' if visible else '•')
+                btn.configure(text=self.T('hide') if visible else self.T('show'))
+            btn.configure(command=toggle)
+            btn.pack(side='left', padx=(7, 0))
+        if browse:
+            self._button(entryrow, self.T('browse'), self.choose_folder, 'secondary', True).pack(side='left', padx=(7, 0))
 
     def _settings(self, page):
-        toolbar = tk.Frame(page, bg=P["bg"])
-        toolbar.pack(fill="x", pady=(0, 13))
-        self.save_btn = self._button(toolbar, "✓  Beállítások mentése", self.save, state="disabled")
-        self.save_btn.configure(bg=P["line"])
-        self.save_btn.pack(side="right")
-        inner = self._scroll_page(page)
-        group = self._group(inner, "qBittorrent kapcsolat")
-        self._input(group, "qb_url", "Web UI címe", 0)
-        self._input(group, "qb_username", "Felhasználónév", 1)
-        self._input(group, "qb_password", "Jelszó", 2, secret=True)
-        self._input(group, "qb_save_path", "Letöltési mappa", 3, folder=True)
-
-        group = self._group(inner, "Automatizálási korlátok")
-        for i,(key,label) in enumerate((
-            ("check_minutes", "Ellenőrzési időköz (perc)"),
-            ("max_managed_torrents", "Torrentek száma (darab)"),
-            ("max_disk_usage_percent", "Tárhelykorlát (%)"),
-            ("min_size_gb", "Minimális torrentméret (GB)"),
-            ("max_size_gb", "Maximális torrentméret (GB)"),
-        )):
-            self._input(group,key,label,i)
-
-        safety = self._card(inner,22)
-        safety.pack(fill="x",pady=(0,16))
-        self._label(safety,"Biztonság és működés",14,bold=True).pack(anchor="w",pady=(0,10))
-        mode = tk.StringVar(value=self.cfg.get("mode","dry"))
-        self.vars["mode"] = mode
-        for key,label in (
-            ("dry","Próbaüzem"),
-            ("add","Csak új torrentek hozzáadása"),
-            ("full","Új torrentek hozzáadása és törlése (fájlokkal együtt)"),
-        ):
-            tk.Radiobutton(safety,text=label,variable=mode,value=key,
-                           bg=P["panel"],fg=P["white"],activeforeground=P["white"],
-                           activebackground=P["panel"],selectcolor=P["input"],
-                           font=(FONT,11),cursor="hand2",anchor="w").pack(anchor="w",pady=5)
-
+        heading = tk.Frame(page, bg=P['bg'])
+        heading.pack(fill='x', pady=(0, 15))
+        self._label(heading, self.T('settings'), 22, bold=True).pack(side='left')
+        self.save_btn = self._button(heading, self.T('save'), self.save, state='disabled')
+        self.save_btn.pack(side='right')
+        interior, self.settings_canvas = self._scroll_page(page)
+        group = self._group(interior, self.T('connection_settings'))
+        for i, (key, title) in enumerate([('qb_url', 'url'), ('qb_username', 'user'),
+                                         ('qb_password', 'password'), ('qb_save_path', 'path')]):
+            self._input(group, key, self.T(title), i, secret=key == 'qb_password',
+                        browse=key == 'qb_save_path')
+        group = self._group(interior, self.T('automation_limits'))
+        for i, (key, title) in enumerate([('check_minutes', 'interval_m'),
+                                         ('max_managed_torrents', 'total_n'),
+                                         ('max_disk_usage_percent', 'limit_percent'),
+                                         ('min_size_gb', 'min_gb'), ('max_size_gb', 'max_gb')]):
+            self._input(group, key, self.T(title), i)
+        operation = self._card(interior, 18)
+        operation.pack(fill='x', pady=(0, 12))
+        self._label(operation, self.T('safety'), 12, bold=True).pack(anchor='w', pady=(0, 8))
+        self.vars['mode'] = tk.StringVar(value=self.cfg.get('mode', 'dry'))
+        for mode, label in (('dry', 'dry_full'), ('add', 'add_full'), ('full', 'delete_full')):
+            tk.Radiobutton(operation, text=self.T(label), value=mode, variable=self.vars['mode'],
+                           font=(FONT, 10), bg=P['panel'], fg=P['text'], selectcolor=P['input'],
+                           activebackground=P['panel'], activeforeground=P['text']).pack(anchor='w', pady=4)
+        login_row = self._card(interior, 14)
+        login_row.pack(fill='x', pady=(0, 12))
+        self._label(login_row, self.T('login_title'), 11, bold=True).pack(side='left')
+        self._button(login_row, self.T('login_open'), self.open_bithumen_login,
+                     'secondary', True).pack(side='right')
+        appearance = self._card(interior, 18)
+        appearance.pack(fill='x', pady=(0, 12))
+        self._label(appearance, self.T('appearance'), 12, bold=True).pack(anchor='w', pady=(0, 11))
+        r1 = tk.Frame(appearance, bg=P['panel'])
+        r1.pack(fill='x', pady=(0, 8))
+        self._label(r1, self.T('theme'), 10, bold=True).pack(side='left', padx=(0, 18))
+        self.vars['theme'] = tk.StringVar(value=self.cfg.get('theme', 'dark'))
+        for key in ('dark', 'light', 'system'):
+            tk.Radiobutton(r1, text=self.T(key), value=key, variable=self.vars['theme'],
+                           bg=P['panel'], fg=P['text'], font=(FONT, 9),
+                           selectcolor=P['input'], activebackground=P['panel'],
+                           activeforeground=P['text']).pack(side='left', padx=(0, 9))
+        r2 = tk.Frame(appearance, bg=P['panel'])
+        r2.pack(fill='x', pady=(5, 7))
+        self._label(r2, self.T('language'), 10, bold=True).pack(side='left', padx=(0, 18))
+        self.vars['language'] = tk.StringVar(value=self.cfg.get('language', 'hu'))
+        choices = list(LANGUAGES.items())
+        codes = [code for code, _ in choices]
+        self.language_box = ttk.Combobox(r2, state='readonly', style='TM.TCombobox',
+                                          values=[label for _, label in choices], width=24)
+        self.language_box.current(codes.index(self.cfg.get('language', 'hu')))
+        self.language_box.pack(side='left', fill='x', expand=True)
+        self.language_box.bind('<<ComboboxSelected>>', lambda _: self.vars['language'].set(codes[self.language_box.current()]))
+        self._label(appearance, self.T('language_note'), 9, 'muted').pack(anchor='w')
         self._saved_signature = self._form_signature()
-        for var in self.vars.values():
-            var.trace_add("write",lambda *_: self._sync_dirty())
+        for variable in self.vars.values():
+            variable.trace_add('write', lambda *_: self._sync_dirty())
         self._sync_dirty()
 
     def _form_signature(self):
-        return tuple((key, var.get()) for key,var in sorted(self.vars.items()))
+        return tuple((key, variable.get()) for key, variable in sorted(self.vars.items()))
 
     def _sync_dirty(self):
-        dirty=self._form_signature()!=self._saved_signature
-        self.save_btn.configure(state="normal" if dirty else "disabled",
-                                bg=P["blue"] if dirty else P["line"])
+        if hasattr(self, 'save_btn') and self.save_btn.winfo_exists():
+            dirty = self._form_signature() != self._saved_signature
+            self.save_btn.configure(state='normal' if dirty else 'disabled',
+                                    bg=P['blue'] if dirty else P['line'])
 
     def _activity(self, page):
-        box = self._card(page, 18)
-        box.pack(fill="both", expand=True)
-        top = tk.Frame(box, bg=P["panel"])
-        top.pack(fill="x", pady=(0, 15))
-        self._label(top, "Élő eseménynapló", 14, bold=True).pack(side="left")
-        self._button(top, "Napló mappa megnyitása", self.open_data_folder, "secondary").pack(side="right")
-        self.logbox = tk.Text(box, wrap="word", bg=P["input"], fg=P["text"],
-                              insertbackground=P["text"], selectbackground=P["panel_hi"],
-                              font=(FONT, 11), bd=0, padx=14, pady=14, state="disabled")
-        scroll = tk.Scrollbar(box, command=self.logbox.yview, bg=P["panel_hi"],
-                              troughcolor=P["input"], activebackground=P["blue"],
-                              highlightthickness=0, bd=0, relief="flat")
-        self.logbox.configure(yscrollcommand=scroll.set)
-        scroll.pack(side="right", fill="y")
-        self.logbox.pack(fill="both", expand=True)
-        self.logbox.tag_configure("error", foreground=P["red"])
-        self.logbox.tag_configure("success", foreground=P["green"])
-        self.logbox.tag_configure("muted", foreground=P["muted"])
+        header = tk.Frame(page, bg=P['bg'])
+        header.pack(fill='x', pady=(0, 13))
+        self._label(header, self.T('logs'), 22, bold=True).pack(side='left')
+        self._button(header, self.T('open_logs'), self.open_data_folder, 'secondary', True).pack(side='right')
+        box = self._card(page)
+        box.pack(fill='both', expand=True)
+        self._label(box, self.T('live_log'), 12, bold=True).pack(anchor='w', pady=(0, 10))
+        self.logbox = tk.Text(box, wrap='word', bg=P['input'], fg=P['text'],
+                              insertbackground=P['text'], selectbackground=P['panel_hi'],
+                              font=(FONT, 11), bd=0, padx=14, pady=12, state='disabled')
+        scrollbar = ttk.Scrollbar(box, orient='vertical', command=self.logbox.yview,
+                                  style='TM.Vertical.TScrollbar')
+        self.logbox.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side='right', fill='y')
+        self.logbox.pack(fill='both', expand=True)
+        for name, color in (('error', P['red']), ('success', P['green']), ('muted', P['muted'])):
+            self.logbox.tag_configure(name, foreground=color)
 
     def _updates(self, page):
-        hero = self._card(page, 22)
-        hero.pack(fill="x", pady=(0, 13))
-        self._label(hero, "Telepített verzió", 10, "muted", True).pack(anchor="w")
-        self._label(hero, f"Torrent Manager v{VERSION}", 22, bold=True).pack(anchor="w", pady=(7, 8))
-        self._label(hero, "Frissítések a hivatalos GitHub-kiadásokból.", 10, "muted").pack(anchor="w")
+        self._label(page, self.T('updates'), 22, bold=True).pack(anchor='w', pady=(0, 13))
+        interior, self.updates_canvas = self._scroll_page(page)
+        metrics = tk.Frame(interior, bg=P['bg'])
+        metrics.pack(fill='x', pady=(0, 10))
+        metrics.columnconfigure(0, weight=1)
+        metrics.columnconfigure(1, weight=1)
+        installed = self._card(metrics, 17)
+        installed.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
+        self._label(installed, self.T('installed'), 9, 'muted').pack(anchor='w')
+        self._label(installed, 'v' + VERSION, 21, bold=True).pack(anchor='w', pady=(6, 0))
+        newest = self._card(metrics, 17)
+        newest.grid(row=0, column=1, sticky='nsew')
+        self._label(newest, self.T('latest'), 9, 'muted').pack(anchor='w')
+        self.latest_value = tk.StringVar(value='–')
+        tk.Label(newest, textvariable=self.latest_value, bg=P['panel'], fg=P['text'],
+                 font=(FONT, 21, 'bold'), anchor='w').pack(anchor='w', pady=(6, 0))
+        actions = self._card(interior, 18)
+        actions.pack(fill='x', pady=(0, 10))
+        self._label(actions, self.T('versions'), 12, bold=True).pack(anchor='w', pady=(0, 8))
+        tk.Label(actions, textvariable=self.update_message, bg=P['panel'], fg=P['muted'],
+                 font=(FONT, 10), justify='left', anchor='w', wraplength=720).pack(fill='x', pady=(0, 9))
+        buttons = tk.Frame(actions, bg=P['panel'])
+        buttons.pack(fill='x', pady=(0, 9))
+        self.check_button = self._button(buttons, self.T('check'), self.check_updates, 'secondary')
+        self.check_button.pack(side='left')
+        self.version_choice = tk.StringVar()
+        self.versions_box = ttk.Combobox(actions, textvariable=self.version_choice,
+                                          state='readonly', style='TM.TCombobox', width=38)
+        self.versions_box.pack(fill='x', pady=(0, 9))
+        self.versions_box.bind('<<ComboboxSelected>>', lambda _e: self._update_install_enabled())
+        self.install_button = self._button(actions, self.T('install'), self.install_update, state='disabled')
+        self.install_button.pack(fill='x', pady=(0, 9))
+        self._label(actions, self.T('download_note'), 9, 'muted', wraplength=720, justify='left').pack(anchor='w')
+        about = self._card(interior, 18)
+        about.pack(fill='both', expand=True)
+        self._label(about, self.T('about'), 12, bold=True).pack(anchor='w', pady=(0, 8))
+        description = self.T('about_description')
+        self._label(about, description, 10, 'text', wraplength=920, justify='left').pack(anchor='w', fill='x', pady=(0, 15))
+        self._button(about, self.T('github'), lambda: webbrowser.open('https://github.com/' + GITHUB_REPO),
+                     'secondary').pack(anchor='w')
 
-        result = self._card(page, 22)
-        result.pack(fill="x", pady=(0, 13))
-        self._label(result, "Szoftverfrissítés", 14, bold=True).pack(anchor="w")
-        tk.Label(result, textvariable=self.update_message, bg=P["panel"], fg=P["muted"],
-                 font=(FONT, 11), anchor="w", justify="left", wraplength=690).pack(fill="x", pady=(9, 14))
-        self.check_button = self._button(result, "Frissítés keresése", self.check_updates)
-        self.check_button.pack(anchor="w", pady=(0, 9))
-        self.install_button = self._button(result, "Frissítés letöltése és telepítése", self.install_update,
-                                          state="disabled")
-        self.install_button.pack(anchor="w")
-        self._label(result, "A fájl épségét SHA-256 ellenőrzés védi; Windows-jogosultságkérés megjelenhet.",
-                    9, "muted", wraplength=680, justify="left").pack(anchor="w", pady=(13, 0))
+    def _load_log_tail(self):
+        if not LOG.exists():
+            return
+        try:
+            with LOG.open('rb') as handle:
+                handle.seek(0, os.SEEK_END)
+                size = handle.tell()
+                handle.seek(max(0, size - 28000))
+                lines = handle.read().decode('utf-8', errors='replace').splitlines()
+            self.log_lines = (lines[1:] if size > 28000 else lines)[-130:]
+        except OSError:
+            self.log_lines = []
 
-        about = self._card(page, 19)
-        about.pack(fill="x")
-        self._label(about, "A Torrent Managerről", 13, bold=True).pack(anchor="w", pady=(0, 8))
-        self._label(about, "A Torrent Manager a BitHuMen legtöbbet seedelt torrentjeit figyeli, és a "
-                    "qBittorrent segítségével kezeli a letöltéseket. Beállítható a torrentszám, "
-                    "a tárhelyhatár, valamint a minimális és maximális méret.",
-                    10, "text", wraplength=670, justify="left").pack(anchor="w", pady=(0, 7))
-        self._label(about, "Próbaüzem, csak hozzáadás és ellenőrzött hozzáadás/törlés módokkal, "
-                    "naplózással és beépített frissítéssel.",
-                    10, "muted", wraplength=670, justify="left").pack(anchor="w")
+    def _reload_visible_logs(self):
+        self.logbox.configure(state='normal')
+        self.logbox.delete('1.0', 'end')
+        for line in self.log_lines[-600:]:
+            self._write_log_widget(self.logbox, line)
+        self.logbox.configure(state='disabled')
+        self.logbox.see('end')
+        self.preview.configure(state='normal')
+        self.preview.delete('1.0', 'end')
+        for line in self.log_lines[-14:]:
+            self.preview.insert('end', line[:250] + '\n')
+        self.preview.configure(state='disabled')
+        self.preview.see('end')
+
+    def _write_log_widget(self, widget, line):
+        lower = line.lower()
+        tag = 'error' if ('hiba' in lower or 'sikertelen' in lower or 'error' in lower) else \
+              'success' if ('hozzáadva' in lower or 'sikeres' in lower) else 'muted'
+        widget.insert('end', line + '\n', tag)
+
+    def append(self, line):
+        line = str(line)
+        self.log_lines.append(line)
+        self.log_lines = self.log_lines[-1400:]
+        self._write_text(self.logbox, line, styled=True)
+        self._write_text(self.preview, line[:250], maxlines=55)
+
+    def _write_text(self, widget, line, styled=False, maxlines=1400):
+        widget.configure(state='normal')
+        if styled:
+            self._write_log_widget(widget, line)
+        else:
+            widget.insert('end', line + '\n')
+        if int(widget.index('end-1c').split('.')[0]) > maxlines:
+            widget.delete('1.0', f'{max(1, maxlines // 4)}.0')
+        widget.see('end')
+        widget.configure(state='disabled')
+
+    def open_bithumen_login(self):
+        # Opening a visible browser requires an explicit click; never show it at app start.
+        if self.proc and self.proc.poll() is None:
+            messagebox.showinfo('BitHuMen',
+                'Előbb állítsd le az automatizálást, hogy a böngészőprofil felszabaduljon.',
+                parent=self.root)
+            return
+        if getattr(sys, 'frozen', False):
+            executable = BASE / 'TorrentLogin.exe'
+            cmd = [str(executable)]
+        else:
+            executable = BASE / 'auth_browser.py'
+            cmd = [sys.executable, str(executable)]
+        if not executable.exists():
+            messagebox.showerror('BitHuMen', 'Hiányzik a bejelentkezési segédprogram.', parent=self.root)
+            return
+        env = os.environ.copy()
+        browser = find_playwright_browsers()
+        if browser:
+            env['PLAYWRIGHT_BROWSERS_PATH'] = str(browser)
+        try:
+            subprocess.Popen(cmd, cwd=str(DATA_DIR), stdin=subprocess.DEVNULL,
+                             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), env=env)
+            self.append('Kézi BitHuMen-bejelentkezés megnyitva.')
+        except OSError as exc:
+            messagebox.showerror('BitHuMen', str(exc), parent=self.root)
 
     def choose_folder(self):
         folder = filedialog.askdirectory(parent=self.root)
         if folder:
-            self.vars["qb_save_path"].set(folder)
+            self.vars['qb_save_path'].set(folder)
 
     def _validated_settings(self):
-        cfg = dict(self.cfg)
-        for key,var in self.vars.items():
-            cfg[key]=var.get().strip() if isinstance(var,tk.StringVar) else var.get()
-        cfg=validate_settings(cfg)
-        for key,label in (("qb_url","Web UI címe"),("qb_username","Felhasználónév"),
-                          ("qb_password","Jelszó"),("qb_save_path","Letöltési mappa")):
-            if not str(cfg[key]).strip():
-                raise ValueError("Hiányzó beállítás: "+label)
-        if not Path(cfg["qb_save_path"].strip()).is_dir():
-            raise ValueError("A letöltési mappa nem létezik.")
-
-        return cfg
-
-    def _write_config(self,cfg):
-        DATA_DIR.mkdir(parents=True,exist_ok=True)
-        tmp=SETTINGS.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(cfg,ensure_ascii=False,indent=2),encoding="utf-8")
-        tmp.replace(SETTINGS)
-        self.cfg=cfg
+        config = dict(self.cfg)
+        for key, var in self.vars.items():
+            config[key] = var.get().strip() if isinstance(var, tk.StringVar) else var.get()
+        config = validate_settings(config)
+        if not str(config['qb_url']).strip():
+            raise ValueError('Hiányzik a WebUI címe.')
+        # Connection credentials and folder can be filled in later; start remains disabled until ready.
+        if config['qb_save_path'] and not Path(config['qb_save_path']).is_dir():
+            raise ValueError('A letöltési mappa nem létezik.')
+        return config
 
     def save(self):
         try:
-            cfg=self._validated_settings()
-            if cfg["mode"]=="full" and self.cfg.get("mode")!="full":
-                if not messagebox.askyesno("Végleges fájltörlés",
-                    "Ebben az üzemmódban a kezelt torrentek és a letöltött fájljaik is véglegesen törlődhetnek. Engedélyezed?",
-                    parent=self.root):
+            new = self._validated_settings()
+            if new['mode'] == 'full' and self.cfg.get('mode') != 'full':
+                if not messagebox.askyesno('Végleges fájltörlés',
+                    'A kezelt torrentek és letöltött fájljaik törlődhetnek. Engedélyezed?', parent=self.root):
                     return False
-            self._write_config(cfg)
-            self._saved_signature=self._form_signature()
-            self._sync_dirty()
-            self.append("Beállítások mentve.")
+            changed_view = (new['theme'], new['language']) != (self.cfg.get('theme'), self.cfg.get('language'))
+            changed_webui = any(new[k] != self.cfg.get(k) for k in ('qb_url','qb_username','qb_password'))
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            tmp = SETTINGS.with_suffix('.json.tmp')
+            tmp.write_text(json.dumps(new, indent=2, ensure_ascii=False), encoding='utf-8')
+            tmp.replace(SETTINGS)
+            self.cfg = new
+            if changed_webui:
+                self.connected = False
+                self.connection_message = 'check_qb'
+                self.events.put(('trigger_webui', None))
+            if changed_view:
+                self._render('settings')
+            else:
+                self._saved_signature = self._form_signature()
+                self._sync_dirty()
+            self.append(self.T('saved'))
             self.refresh_stats()
             return True
-        except (ValueError,OSError,UpdateError) as exc:
-            messagebox.showerror("Beállítási hiba",str(exc),parent=self.root)
+        except (ValueError, OSError) as exc:
+            messagebox.showerror('Beállítási hiba', str(exc), parent=self.root)
             return False
-
-    def append(self, line):
-        line = str(line)
-        lowered = line.lower()
-        tag = "error" if "hiba" in lowered or "sikertelen" in lowered else "success" if "hozzáadva" in lowered else "muted"
-        self.logbox.configure(state="normal")
-        self.logbox.insert("end", line + "\n", tag)
-        if int(self.logbox.index("end-1c").split(".")[0]) > 1600:
-            self.logbox.delete("1.0", "300.0")
-        self.logbox.see("end")
-        self.logbox.configure(state="disabled")
-        import re
-        event = re.search(r"(?:^|\s)(Letöltve|Eltávolítva|Hozzáadva és ellenőrizve):\s*(.+)$",line)
-        if event:
-            verb="Letöltve" if event.group(1).startswith(("Let", "Hoz")) else "Eltávolítva"
-            title=event.group(2).split(" | ")[0].split(" (fájlok")[0]
-            self.preview.configure(state="normal")
-            self.preview.insert("end", f"{verb}: {title}\n")
-            if int(self.preview.index("end-1c").split(".")[0]) > 18:
-                self.preview.delete("1.0","5.0")
-            self.preview.see("end")
-            self.preview.configure(state="disabled")
-
-    def _read_last_logs(self):
-        if not LOG.exists():
-            self.append("A napló itt fog megjelenni az első indítás után.")
-            return
-        try:
-            with LOG.open("rb") as file:
-                file.seek(0, os.SEEK_END)
-                size = file.tell()
-                file.seek(max(0, size - 24000))
-                data = file.read().decode("utf-8", errors="replace")
-            lines = data.splitlines()
-            if size > 24000 and lines:
-                lines = lines[1:]
-            for line in lines[-70:]:
-                self.append(line)
-        except OSError:
-            self.append("A korábbi napló nem olvasható.")
 
     def _status(self, running):
         self.running = running
-        self.status.set("Fut" if running else "Leállítva")
-        self.home_status.configure(text="●  Fut" if running else "●  Leállítva",
-                                   fg=P["green"] if running else P["muted"])
-        self.start_btn.configure(state="disabled" if running else "normal")
-        self.stop_btn.configure(state="normal" if running else "disabled")
+        label = self.T('running' if running else 'stopped')
+        self.status.set(label)
+        self.metric_auto.set(label)
+        self.start_btn.configure(state='disabled' if running or not self.connected else 'normal',
+                                 bg=P['line'] if running or not self.connected else P['blue'])
+        self.stop_btn.configure(state='normal' if running else 'disabled')
+
+    def _bit_status(self):
+        if hasattr(self, 'bit_indicator'):
+            self.bit_indicator.configure(text=('●  ' if self.bithumen_ready else '○  ') + 'BitHuMen',
+                                         fg=P['green'] if self.bithumen_ready else P['muted'])
+
+    def _connection_update(self, ready, message):
+        self.connected = ready
+        self.connection_message = message
+        if ready:
+            text = self.T('connected')
+        elif message in ('missing_credentials', 'bad_credentials', 'invalid_url'):
+            text = self.T(message)
+        else:
+            text = self.T('waiting')
+        self.webui_status.set(text)
+        if hasattr(self, 'qb_indicator'):
+            self.qb_indicator.configure(text=('●  ' if ready else '○  ') + 'qBittorrent',
+                                        fg=P['green'] if ready else P['muted'])
+        if hasattr(self, 'webui_indicator'):
+            self.webui_indicator.configure(text=('●  ' if ready else '○  ') + text,
+                                           fg=P['green'] if ready else P['amber'])
+        self._status(self.running)
+
+    def _webui_loop(self):
+        last_signature = None
+        while not self.closed:
+            cfg = self.cfg.copy()
+            signature = (cfg.get('qb_url'), cfg.get('qb_username'), cfg.get('qb_password'))
+            if signature != last_signature:
+                last_signature = signature
+            try:
+                ready, message = check_webui(*signature)
+                self.events.put(('webui', (signature, ready, message)))
+            except Exception as exc:
+                self.events.put(('webui', (signature, False, 'not_ready')))
+            for _ in range(30):
+                if self.closed:
+                    break
+                time.sleep(.1)
 
     def start(self):
         if self.proc and self.proc.poll() is None:
             return
-        if (self._form_signature()!=self._saved_signature or not SETTINGS.exists()) and not self.save():
-            self.show_page("settings")
+        if not self.connected:
+            self.append('A WebUI még nem elérhető. Várakozás a kapcsolatra.')
             return
-        if getattr(sys, "frozen", False):
-            engine = BASE / "TorrentMotor.exe"
-            cmd = [str(engine)]
+        if self._form_signature() != self._saved_signature or not SETTINGS.exists():
+            if not self.save():
+                self.show_page('settings')
+                return
+            # If connection credentials were changed, await fresh WebUI probe.
+            if not self.connected:
+                return
+        if not self.cfg.get('qb_save_path') or not Path(self.cfg['qb_save_path']).is_dir():
+            messagebox.showerror('Beállítási hiba', 'Előbb állíts be egy érvényes letöltési mappát.', parent=self.root)
+            self.show_page('settings')
+            return
+        if getattr(sys, 'frozen', False):
+            engine, cmd = BASE / 'TorrentMotor.exe', [str(BASE / 'TorrentMotor.exe')]
         else:
-            engine = BASE / "motor.py"
-            cmd = [sys.executable, "-X", "utf8", "-u", str(engine)]
-        if not engine.exists():
-            messagebox.showerror("Hiányzó motor", f"Nem található: {engine}", parent=self.root)
+            engine, cmd = BASE / 'motor.py', [sys.executable, '-X', 'utf8', '-u', str(BASE / 'motor.py')]
+        if not engine.is_file():
+            messagebox.showerror('Hiányzó motor', str(engine), parent=self.root)
             return
-        threading.Thread(target=self._try_start_qb,daemon=True).start()
         env = os.environ.copy()
-        env.update({"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"})
-        if getattr(sys, "frozen", False):
+        env.update(PYTHONIOENCODING='utf-8', PYTHONUTF8='1', PYTHONUNBUFFERED='1')
+        if getattr(sys, 'frozen', False):
             browser = find_playwright_browsers()
             if not browser:
-                messagebox.showerror("Hiányzó Chromium",
-                                     "A program nem találja a Playwright Chromium böngészőt. "
-                                     "Ellenőrizd a 'browsers' mappát a program mellett, "
-                                     "vagy telepítsd a Playwright Chromiumot.", parent=self.root)
+                messagebox.showerror('Hiányzó Chromium', 'Nem található a Playwright Chromium böngésző.', parent=self.root)
                 return
-            env["PLAYWRIGHT_BROWSERS_PATH"] = str(browser)
+            env['PLAYWRIGHT_BROWSERS_PATH'] = str(browser)
         try:
             DATA_DIR.mkdir(parents=True, exist_ok=True)
-            proc = subprocess.Popen(cmd, cwd=str(DATA_DIR), stdin=subprocess.DEVNULL,
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                    text=True, encoding="utf-8", errors="replace", bufsize=1,
-                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), env=env)
-            self.proc = proc
+            # Child logs are decoded UTF-8; the subprocess is headless (motor.py).
+            self.bithumen_ready = False
+            self._bit_status()
+            self.proc = subprocess.Popen(cmd, cwd=str(DATA_DIR), stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                         text=True, encoding='utf-8', errors='replace', bufsize=1,
+                                         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), env=env)
+            self.last_action_time = time.monotonic()
             self._status(True)
-            self.append("Automatizálás elindítva. A BitHuMen szükség esetén bejelentkezést kérhet.")
-            threading.Thread(target=self.reader, args=(proc,), daemon=True).start()
+            self.append('Automatizálás elindítva; Chromium háttérmódban működik.')
+            threading.Thread(target=self.reader, args=(self.proc,), daemon=True).start()
         except (OSError, ValueError) as exc:
             self._status(False)
-            messagebox.showerror("Indítási hiba", str(exc), parent=self.root)
+            messagebox.showerror('Indítási hiba', str(exc), parent=self.root)
 
     def reader(self, proc):
         try:
             for line in proc.stdout:
-                self.events.put(("line", line.rstrip()))
+                self.events.put(('line', line.rstrip('\r\n')))
         except Exception as exc:
-            self.events.put(("line", "Naplóolvasási hiba: " + str(exc)))
-        self.events.put(("done", (proc, proc.wait())))
-
-    def _set_install_enabled(self, enabled):
-        self.install_button.configure(state="normal" if enabled else "disabled",
-                                      bg=P["blue"] if enabled else P["line"])
-
-    def poll(self):
-        try:
-            while True:
-                kind, data = self.events.get_nowait()
-                if kind == "line":
-                    self.append(data)
-                elif kind == "done":
-                    proc, code = data
-                    if proc is self.proc:
-                        self._status(False)
-                        self.append(f"A háttérprogram leállt. Kilépési kód: {code}." +
-                                    (" Ellenőrizd a fenti hibaüzeneteket." if code != 0 else ""))
-                        self.proc = None
-                        self.refresh_stats()
-                elif kind == "update_ok":
-                    self.release = data
-                    if data["newer"]:
-                        self.update_message.set(f"Új verzió érhető el: {data['version']}." +
-                                                (" A telepítő letölthető." if data["installer"] and data["checksums"]
-                                                 else " A kiadásban nincs ellenőrizhető telepítő."))
-                        self._set_install_enabled(bool(data["installer"] and data["checksums"]))
-                    else:
-                        self.update_message.set(f"A telepített v{VERSION} verzió naprakész (legutóbbi kiadás: {data['version']}).")
-                        self._set_install_enabled(False)
-                    self.check_button.configure(state="normal")
-                elif kind == "update_error":
-                    self.update_message.set("Ellenőrzési hiba: " + str(data))
-                    self.check_button.configure(state="normal")
-                elif kind == "download_ok":
-                    self.downloading = False
-                    self._set_install_enabled(True)
-                    self._run_installer(data)
-                elif kind == "download_error":
-                    self.downloading = False
-                    self._set_install_enabled(True)
-                    self.update_message.set("Letöltési hiba: " + str(data))
-                    messagebox.showerror("Frissítési hiba", str(data), parent=self.root)
-        except queue.Empty:
-            pass
-        self.root.after(150, self.poll)
+            self.events.put(('line', 'Naplóolvasási hiba: ' + str(exc)))
+        self.events.put(('done', (proc, proc.wait())))
 
     def stop(self):
         proc = self.proc
         if not proc or proc.poll() is not None:
             return
         try:
-            if os.name == "nt":
-                subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            if os.name == 'nt':
+                subprocess.run(['taskkill','/PID',str(proc.pid),'/T','/F'],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=15)
+                               timeout=15, creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
             else:
                 proc.terminate()
-            self.append("Leállítás kérve.")
+            self.append('Leállítás kérve.')
         except (OSError, subprocess.TimeoutExpired) as exc:
-            messagebox.showerror("Leállítási hiba", str(exc), parent=self.root)
+            messagebox.showerror('Leállítási hiba', str(exc), parent=self.root)
+
+    def _paint_disk_bar(self):
+        if not hasattr(self, 'disk_track') or not self.disk_track.winfo_exists():
+            return
+        w = max(1, self.disk_track.winfo_width())
+        self.disk_track.delete('all')
+        self.disk_track.create_rectangle(0, 0, w, 13, fill=P['input'], outline='')
+        color = P['amber'] if self.disk_target > int(self.cfg.get('max_disk_usage_percent', 70)) / 100 else P['green']
+        self.disk_track.create_rectangle(0, 0, int(w*self.disk_fraction), 13,
+                                         fill=color, outline='')
+
+    def _animate_disk(self):
+        if self.closed:
+            self._animating_bar = False
+            return
+        delta = self.disk_target - self.disk_fraction
+        if abs(delta) < .003:
+            self.disk_fraction = self.disk_target
+            self._paint_disk_bar()
+            self._animating_bar = False
+            return
+        # ~60 FPS for short easing animations, idle UI has no continuous render loop.
+        self.disk_fraction += delta * .18
+        self._paint_disk_bar()
+        self.root.after(16, self._animate_disk)
 
     def refresh_stats(self):
         cfg = self.cfg
-        path=str(cfg.get("qb_save_path", "")).strip()
         try:
+            path = str(cfg.get('qb_save_path','')).strip()
             if not path or not Path(path).is_dir():
-                raise OSError("Nincs célmappa")
-            disk=shutil.disk_usage(path)
-            percent=disk.used / disk.total*100
-            limit=int(cfg["max_disk_usage_percent"])
-            self.stat_disk.set(f"{percent:.1f}%")
-            self.disk_subtitle.configure(text=f"{percent:.1f}% / {limit}%")
-            self.disk_bar.place_configure(relwidth=max(0.0,min(1.0,percent/100)))
-            self.disk_bar.configure(bg=P["amber"] if percent>=limit else P["green"])
-        except (OSError,ValueError,ZeroDivisionError):
-            self.stat_disk.set("–")
-            self.disk_subtitle.configure(text="Nem elérhető")
-            self.disk_bar.place_configure(relwidth=0)
-        modes={"dry":"Próbaüzem","add":"Csak hozzáadás","full":"Hozzáadás és fájltörlés"}
-        minimum=cfg.get("min_size_gb", "")
-        maximum=cfg.get("max_size_gb", "")
-        self.home_mode.set(modes.get(cfg["mode"], "–"))
-        size_label = (f"{minimum or '–'} – {maximum or '–'} GB" if minimum or maximum
-                      else "Nincs méretkorlát")
-        self.home_details.set(
-            f"Torrentek száma: {cfg['max_managed_torrents']} darab    •    "
-            f"Ellenőrzés: {cfg['check_minutes']} percenként\n"
-            f"Torrentméret: {size_label}    •    "
-            f"Tárhelykorlát: {cfg['max_disk_usage_percent']}%")
+                raise OSError('Hiányzó mappa')
+            usage = shutil.disk_usage(path)
+            percent = 100 * usage.used / usage.total
+            limit = int(cfg['max_disk_usage_percent'])
+            self.stat_disk.set(f'{percent:.1f}%')
+            self.stat_used.set(f'{percent:.1f}% / {limit}%')
+            self.disk_target = max(0., min(1., percent / 100))
+        except (OSError, ValueError, ZeroDivisionError):
+            self.stat_disk.set('–')
+            self.stat_used.set(self.T('unavailable'))
+            self.disk_target = 0.
+        if not self._animating_bar:
+            self._animating_bar = True
+            self._animate_disk()
+        mode = self.T(cfg.get('mode','dry'))
+        self.home_mode.set(mode)
+        lo, hi = cfg.get('min_size_gb',''), cfg.get('max_size_gb','')
+        sizes = (f'{lo or "–"} – {hi or "–"} GB') if lo or hi else self.T('no_limit')
+        if hasattr(self, 'mini_total'):
+            self.mini_total.set(str(cfg['max_managed_torrents']))
+            self.mini_interval.set(str(cfg['check_minutes']) + ' min')
+            self.mini_min.set(str(lo) + ' GB' if lo else '–')
+            self.mini_max.set(str(hi) + ' GB' if hi else '–')
+        self.home_details.set(f"{self.T('total')}: {cfg['max_managed_torrents']}\n"
+                              f"{self.T('interval')}: {cfg['check_minutes']} min\n"
+                              f"{self.T('minsize')} / {self.T('maxsize')}: {sizes}\n"
+                              f"{self.T('limit')}: {cfg['max_disk_usage_percent']}%")
+        if self.running:
+            remainder = max(0, int(cfg['check_minutes']) * 60 - int((time.monotonic() - self.last_action_time) % (int(cfg['check_minutes']) * 60)))
+            self.next_check.set(f'{remainder // 60:02d}:{remainder % 60:02d} (becslés)')
+        else:
+            self.next_check.set('–')
+
+    def _periodic_stats(self):
+        if not self.closed:
+            self.refresh_stats()
+            self.root.after(1000, self._periodic_stats)
+
+    def _try_start_qb(self):
+        try:
+            started = launch_qbittorrent()
+            self.events.put(('line', 'qBittorrent háttérben elindítva.' if started
+                             else 'A qBittorrent már fut; meglévő ablak változatlan.'))
+        except Exception as exc:
+            self.events.put(('line', 'qBittorrent indítási hiba: ' + str(exc)))
 
     def _remove_old_startup(self):
         try:
             remove_legacy_windows_startup()
         except Exception as exc:
-            self.events.put(("line", "Régi Windows-indítási bejegyzés eltávolítása sikertelen: " + str(exc)))
+            self.events.put(('line', 'Korábbi automatikus indítás eltávolítása sikertelen: ' + str(exc)))
 
-    def _try_start_qb(self):
-        try:
-            launch_qbittorrent()
-            self.events.put(("line","qBittorrent indítási kérés elküldve."))
-        except Exception as exc:
-            self.events.put(("line","qBittorrent automatikus indítása nem sikerült: "+str(exc)))
+    def _releases_to_combobox(self):
+        if not hasattr(self, 'versions_box'):
+            return
+        self.release_by_version = {item['version']: item for item in self.releases}
+        options = [i['version'] for i in self.releases]
+        self.versions_box.configure(values=options)
+        if self.version_choice.get() not in options:
+            self.version_choice.set(next((v for v in options if v == 'v' + VERSION), options[0] if options else ''))
+        self._update_install_enabled()
 
-    def _periodic_stats(self):
-        self.refresh_stats()
-        self.root.after(30000, self._periodic_stats)
+    def _update_install_enabled(self):
+        release = self.release_by_version.get(self.version_choice.get())
+        enabled = (not self.downloading and release is not None and release['installer'] is not None
+                   and release['checksums'] is not None
+                   and parse_version(release['version']) != parse_version(VERSION))
+        self.install_button.configure(state='normal' if enabled else 'disabled',
+                                      bg=P['blue'] if enabled else P['line'])
 
     def check_updates(self):
-        repo = GITHUB_REPO
-        self.release = None
-        self._set_install_enabled(False)
-        self.check_button.configure(state="disabled")
-        self.update_message.set("Kapcsolódás a GitHubhoz…")
-        def task():
+        self.check_button.configure(state='disabled')
+        self.update_message.set('GitHub Releases…')
+        def work():
             try:
-                self.events.put(("update_ok", check_latest(repo)))
+                self.events.put(('releases_ok', list_releases(GITHUB_REPO)))
             except Exception as exc:
-                self.events.put(("update_error", exc))
-        threading.Thread(target=task, daemon=True).start()
+                self.events.put(('releases_error', str(exc)))
+        threading.Thread(target=work, daemon=True).start()
 
     def install_update(self):
-        if os.name != "nt":
-            messagebox.showinfo("Csak Windows", "A telepítő Windows alatt használható.", parent=self.root)
+        if os.name != 'nt':
+            messagebox.showinfo('Windows', 'A telepítő kizárólag Windows alatt indítható.', parent=self.root)
             return
-        if not self.release or not self.release.get("newer") or self.downloading:
+        release = self.release_by_version.get(self.version_choice.get())
+        if self.downloading or not release or not release.get('installer') or not release.get('checksums'):
             return
+        version = release['version']
+        older = parse_version(version) < parse_version(VERSION)
+        if older:
+            if not messagebox.askyesno('Korábbi verzió telepítése',
+                    f'A(z) {version} régebbi a telepített v{VERSION} verziónál. '
+                    'A régi verzió nem feltétlenül érti a jelenlegi beállításokat. '
+                    'Automatikus mentés készül. Folytatod?', parent=self.root):
+                return
+        if not messagebox.askyesno('Verzió telepítése', f'Telepítendő: {version}. Folytatod?', parent=self.root):
+            return
+        if SETTINGS.exists():
+            backup = DATA_DIR / 'backups'
+            backup.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(SETTINGS, backup / ('settings-before-' + datetime.now().strftime('%Y%m%d-%H%M%S') + '.json'))
         self.downloading = True
-        self._set_install_enabled(False)
-        self.update_message.set("Telepítő letöltése és ellenőrzése…")
-        release = dict(self.release)
-        def task():
+        self._update_install_enabled()
+        self.update_message.set('Telepítő letöltése és SHA-256 ellenőrzése…')
+        def work():
             try:
-                dest = download_installer(release, DATA_DIR / "updates")
-                self.events.put(("download_ok", dest))
+                dest = download_installer(release, DATA_DIR / 'updates')
+                self.events.put(('download_ok', dest))
             except Exception as exc:
-                self.events.put(("download_error", exc))
-        threading.Thread(target=task, daemon=True).start()
+                self.events.put(('download_error', str(exc)))
+        threading.Thread(target=work, daemon=True).start()
 
-    def _run_installer(self, path):
-        """A segédindító az alkalmazás bezárása után csendesen telepít."""
-        import shutil
+    def _run_installer(self, installer):
         try:
-            if getattr(sys, "frozen", False):
-                helper = BASE / "TorrentUpdater.exe"
+            if getattr(sys, 'frozen', False):
+                helper = BASE / 'TorrentUpdater.exe'
                 if not helper.is_file():
-                    raise FileNotFoundError("Hiányzik a TorrentUpdater.exe a telepítésből.")
-                copied = DATA_DIR / "updates" / "TorrentUpdater.exe"
-                shutil.copy2(helper, copied)
-                cmd = [str(copied)]
+                    raise FileNotFoundError('Hiányzik a TorrentUpdater.exe.')
+                copy = DATA_DIR / 'updates' / 'TorrentUpdater.exe'
+                shutil.copy2(helper, copy)
+                cmd = [str(copy)]
             else:
-                helper = BASE / "update_helper.py"
-                cmd = [sys.executable, str(helper)]
-            app_exe = BASE / "TorrentManager.exe" if getattr(sys, "frozen", False) else BASE / "TorrentManager.py"
+                cmd = [sys.executable, str(BASE / 'update_helper.py')]
+            exe = BASE / ('TorrentManager.exe' if getattr(sys, 'frozen', False) else 'TorrentManager.py')
             if self.proc and self.proc.poll() is None:
                 self.stop()
                 if self.proc.poll() is None:
-                    raise RuntimeError("Az automatizálási folyamat nem állt le, a frissítés megszakadt.")
-            subprocess.Popen(cmd + [str(path), str(app_exe), str(os.getpid())],
-                             cwd=str(DATA_DIR / "updates"), stdin=subprocess.DEVNULL,
+                    raise RuntimeError('Nem állt le az automatizálási folyamat.')
+            subprocess.Popen(cmd + [str(installer), str(exe), str(os.getpid())],
+                             cwd=str(DATA_DIR / 'updates'), stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), close_fds=True)
+                             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), close_fds=True)
+            self.closed = True
             self.root.destroy()
         except (OSError, RuntimeError) as exc:
-            self.update_message.set("Telepítő indítása sikertelen: " + str(exc))
-            messagebox.showerror("Frissítési hiba", str(exc), parent=self.root)
+            self.update_message.set('Telepítő indítási hiba: ' + str(exc))
+            messagebox.showerror('Frissítési hiba', str(exc), parent=self.root)
+
+    def poll(self):
+        if self.closed:
+            return
+        try:
+            while True:
+                kind, data = self.events.get_nowait()
+                if kind == 'line':
+                    if 'BitHuMen bejelentkezés ellenőrizve' in data:
+                        self.bithumen_ready = True
+                        self._bit_status()
+                    if 'BitHuMen bejelentkezés szükséges' in data:
+                        self.bithumen_ready = False
+                        self._bit_status()
+                    self.append(data)
+                elif kind == 'done':
+                    proc, code = data
+                    if proc is self.proc:
+                        self.bithumen_ready = False
+                        self._bit_status()
+                        self._status(False)
+                        self.append(f'A háttérprogram leállt. Kilépési kód: {code}.')
+                        self.proc = None
+                elif kind == 'webui':
+                    signature, connected, message = data
+                    current = tuple(self.cfg.get(key) for key in ('qb_url','qb_username','qb_password'))
+                    if signature == current:
+                        previous = self.connected
+                        self._connection_update(connected, message)
+                        if previous != connected:
+                            self.append('WebUI kapcsolat létrejött.' if connected else 'WebUI kapcsolat megszakadt.')
+                elif kind == 'releases_ok':
+                    self.releases = data
+                    self._releases_to_combobox()
+                    self.latest_value.set(data[0]['version'] if data else '–')
+                    self.update_message.set(self.T('update_ready'))
+                    self.check_button.configure(state='normal')
+                elif kind == 'releases_error':
+                    self.update_message.set('GitHub hiba: ' + data)
+                    self.check_button.configure(state='normal')
+                elif kind == 'download_ok':
+                    self.downloading = False
+                    self._run_installer(data)
+                elif kind == 'download_error':
+                    self.downloading = False
+                    self._update_install_enabled()
+                    self.update_message.set('Letöltési hiba: ' + data)
+                    messagebox.showerror('Frissítési hiba', data, parent=self.root)
+        except queue.Empty:
+            pass
+        if not self.closed:
+            self.root.after(120, self.poll)
 
     def open_data_folder(self):
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        if os.name == "nt":
+        if os.name == 'nt':
             os.startfile(str(DATA_DIR))
         else:
-            messagebox.showinfo("Napló mappája", str(DATA_DIR), parent=self.root)
+            messagebox.showinfo('Naplók', str(DATA_DIR), parent=self.root)
 
     def close(self):
         if self.proc and self.proc.poll() is None:
-            if not messagebox.askyesno("Kilépés", "Leállítsuk az automatizálást is?", parent=self.root):
+            if not messagebox.askyesno('Kilépés', 'Leállítsuk az automatizálást is?', parent=self.root):
                 return
             self.stop()
+        self.closed = True
         self.root.destroy()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     migrate_old_data()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     root = tk.Tk()

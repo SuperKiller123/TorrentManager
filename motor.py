@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """BitHuMen lista -> qBittorrent; alapból biztonságos próbaüzem."""
-import json, os, re, time, shutil, logging, getpass
+import json, os, re, time, shutil, logging, getpass, sys
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, parse_qs, urlencode, urlunparse
 import requests
@@ -9,6 +9,12 @@ from playwright.sync_api import sync_playwright
 from paths import SETTINGS as CFG, STATE, PROFILE, LOG, DATA_DIR, migrate_old_data, find_playwright_browsers
 from policy import TOP_URL, DEFAULT, validate_settings, allowed_size
 from metainfo import torrent_size, TorrentMetadataError
+
+if hasattr(sys.stdout, 'reconfigure'):
+ try:
+  sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
+ except (OSError, ValueError):
+  pass
 
 def log(msg):
  print(msg,flush=True)
@@ -175,26 +181,18 @@ def collect_top_pages(page,c):
 
 def wait_for_bithumen_login(page,c):
  """Wait for actual access to the torrent table, without interrupting the login form."""
- log("BitHuMen hozzáférés ellenőrzése. Ha kell, jelentkezz be a megnyílt böngészőben.")
+ log("BitHuMen hozzáférés ellenőrzése (rejtett Chromium).")
  notified=False
  while True:
   current=urlparse(page.url)
   # Never navigate away while the user is filling in the login form.
   if current.path.endswith("/login.php"):
-   if not notified:
-    log("Bejelentkezés szükséges. A program megvárja a sikeres belépést.")
-    notified=True
-   page.wait_for_timeout(3000)
-   continue
+   raise RuntimeError("BitHuMen bejelentkezés szükséges: állítsd le az automatizálást, és a Beállításokban nyisd meg a kézi bejelentkezést.")
   try:
    page.goto(TOP_URL,wait_until="domcontentloaded",timeout=45000)
    current=urlparse(page.url)
    if current.path.endswith("/login.php"):
-    if not notified:
-     log("A BitHuMen bejelentkezést kér; várakozás a böngészőben.")
-     notified=True
-    page.wait_for_timeout(3000)
-    continue
+    raise RuntimeError("BitHuMen bejelentkezés szükséges: Beállítások > Bejelentkezés megnyitása.")
    if current.path.endswith("/browse.php") and parse_list(page,c):
     log("BitHuMen bejelentkezés ellenőrizve; toplista elérhető.")
     return
@@ -202,6 +200,8 @@ def wait_for_bithumen_login(page,c):
     log("A toplista még nem érhető el. Ellenőrizd a böngészőt.")
     notified=True
   except Exception as exc:
+   if "BitHuMen bejelentkezés szükséges" in str(exc):
+    raise
    if not notified:
     log(f"A toplista még nem elérhető: {exc}")
     notified=True
@@ -375,7 +375,7 @@ def main():
    time.sleep(3)
  state=read_json(STATE,{})
  with sync_playwright() as p:
-  context=p.chromium.launch_persistent_context(str(PROFILE),headless=bool(c["headless"]))
+  context=p.chromium.launch_persistent_context(str(PROFILE),headless=True)
   page=context.pages[0] if context.pages else context.new_page()
   page.goto("https://bithumen.be/",wait_until="domcontentloaded")
   try:

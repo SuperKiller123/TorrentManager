@@ -9,7 +9,7 @@ DEFAULT = {
     "qb_password": "", "qb_save_path": "", "check_minutes": 5,
     "max_disk_usage_percent": 70, "max_managed_torrents": 50,
     "min_size_gb": "", "max_size_gb": "", "mode": "dry",
-    "headless": False,
+    "headless": True, "theme": "dark", "language": "hu",
 }
 MODES = ("dry", "add", "full")
 INT_KEYS = ("check_minutes", "max_disk_usage_percent", "max_managed_torrents")
@@ -43,6 +43,11 @@ def normalize_settings(saved):
     disk = result.get("max_disk_usage_percent")
     if isinstance(disk, float) and disk.is_integer():
         result["max_disk_usage_percent"] = int(disk)
+    if result.get("theme") not in ("dark", "light", "system"):
+        result["theme"] = "dark"
+    from localization import LANGUAGES
+    if result.get("language") not in LANGUAGES:
+        result["language"] = "hu"
     return result
 
 def validate_settings(raw):

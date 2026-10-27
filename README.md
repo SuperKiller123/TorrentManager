@@ -1,51 +1,54 @@
-# Torrent Manager v0.5.0
+# Torrent Manager v0.6.0
 
-A Torrent Manager a BitHuMen **legtöbbet seedelt** torrentjeit figyeli, a qBittorrent Web UI segítségével kezeli a torrenteket. A program magyar nyelvű, Windowsra csomagolható; a Playwright/Chromium böngészőben kezeli a BitHuMen-bejelentkezést.
+A Torrent Manager a BitHuMen legtöbbet **seedelt** torrentjeit figyeli, a qBittorrent WebUI segítségével automatizálja a hozzáadást és – külön engedélyezett üzemmódban – a biztonságosan azonosított, már nem toplistás saját torrentek törlését. A Windowsra készülő felületet és a telepítőt továbbfejlesztettük.
 
-**Fix toplista:** https://bithumen.be/browse.php?sort=seeders&d=DESC
+**Fix toplista:** https://bithumen.be/browse.php?sort=seeders&d=DESC  
+**GitHub:** https://github.com/SuperKiller123/TorrentManager
 
-## Új funkciók a v0.5-ben
+## A v0.6 újdonságai
 
-- **Kezdőlap:** kompakt „Legtöbbet seedelt torrentek kezelése” panel **Indítás** és **Leállítás** gombbal, a tárhely, üzemmód, korlátok és legutóbbi műveletek megjelenítésével. Nincsenek összes/kezelt torrentszámlálók és más fülekre mutató gyorsgombok.
-- **Beállítások:** jelszó gombja **Mutatás / Elrejtés**; „Torrentek száma (darab)”; alapból üres torrentméretmezők, valódi **GB** (SI, 1 GB = 1 000 000 000 bájt); nincs Windows-automatikus indítási kapcsoló vagy qBittorrent-indítási kapcsoló.
-- **qBittorrent:** Torrent Manager indulásakor automatikusan megpróbálja elindítani, ha még nem fut. Minimalizált állapotot kér Windowstól. Az értesítési területre helyezéshez a qBittorrent saját „Start minimized” és „Minimize to notification area” beállításait is kapcsold be. **A torrentautomatizálás ettől még nem indul automatikusan**.
-- **Napló:** mindenhol Segoe UI betűkészletre váltottunk, UTF-8 naplózás megőrizve; a naplóban és az oldalak fejlécében sincs állapotjelző.
-- **Frissítések:** szerkeszthetetlen, beépített `SuperKiller123/TorrentManager` kiadási tároló, egyszerű kétgombos oldal, verzió- és programismertető. Az ellenőrzött frissítő külön segédalkalmazással a főprogram bezárása után csendesen futtatja az Inno Setup telepítőt, majd siker esetén újraindítja a programot. Az Inno Setup megőrzi a régi telepítési mappát, csoportot és a választott feladatokat (pl. asztali parancsikon).
+- **Indítás:** a Torrent Manager maximalizált ablakkal indul. A qBittorrentet, ha nincs elindítva, Windows alatt külön folyamat indítja; az induló qBittorrent ablakát a program ismételten minimalizálja. Már futó példány ablakát nem piszkálja.
+- **WebUI:** külön, háttérben futó, 3 másodpercenként megismételt bejelentkezési/kapcsolatellenőrzés. Az automatizálás Indítás gombja addig nem engedélyezett, amíg a valódi WebUI-hívás nem sikerült.
+- **Chromium:** az automata motor mindig **headless** módot használ. Ha a BitHuMen ismét bejelentkezést kér, az alkalmazás Beállítások fülén **kézzel** megnyitható külön bejelentkezési ablak; a belépési profil megmarad a következő háttérindításhoz. A Chrome nem ugrik fel önmagától.
+- **Ablak:** Windows 10/11 alatt a támogatott DWM-beállításokkal a címsor és az ablakvezérlők témához illesztése. A címsor nem mutatja a program nevét vagy verzióját. **F11**: valódi teljes képernyő; az **Esc nincs hozzárendelve** a kilépéshez. Az F11 ismételt lenyomása kapcsol vissza. Windows-rendszeren való ellenőrzés szükséges.
+- **Ikon:** a bal felső sarokban megjelenő zöld gyémántlogó egységes PNG/ICO fájlban, az alkalmazás és telepítő ikonjaként is.
+- **Oldalsáv:** csak a Torrent Manager felirat jelenik meg az ikon mellett, verzió és alsó magyarázó feliratok nélkül.
+- **Kezdőlap:** új, sűrű műszerfal nyolc élő beállítás-/állapotkártyával, animált tárhelyjelzővel, kapcsolatjelzőkkel, korlátokkal, közelítő következő ellenőrzéssel és mini eseménynaplóval. Az Indítás/Leállítás gombok nem foglalják el az oldal központját.
+- **Animációk:** rövid, kb. 60 FPS időzítésű interpolált mutatók és gombhover; az alkalmazás nem próbál folyamatosan felesleges FPS-t előállítani.
+- **Témák:** sötét, világos és Windows rendszerbeállítást követő mód. A Beállítások mentése után azonnal vált. A mentés gomb felül, a Beállítások címmel egy sorban jelenik meg. Visszatérve a Beállításokba az oldal a tetejére görget.
+- **Nyelvválasztás:** tíz széles körben beszélt nyelv (angol, mandarin kínai, hindi, spanyol, francia, arab, bengáli, portugál, orosz, urdu) + magyar, továbbá német. **Egyetlen telepítő és program tartalmazza mind a 12 választható nyelvet**, a fordítások offline működnek. A fő vezérlőelemek, állapotok és ismertető szövegek fordítottak. A motor technikai naplóüzenetei és néhány diagnosztikai üzenet továbbra is magyar nyelvű, amit következő kiadásban egységesíteni lehet.
+- **Frissítések:** a fül teljes elérhető tartományra terül ki. Külön verzióválasztóval a GitHubon hozzáférhető korábbi kiadások is letölthetők, ha van hozzájuk telepítő és SHA256SUMS.txt. Visszalépéskor a felhasználó figyelmeztetést kap, a beállítások biztonsági másolata elkészül. GitHub-megnyitó gomb és részletes programismertető is van.
+- **Telepítő:** első telepítésnél a felhasználó kiválaszthatja a nyelvet és az asztali parancsikon létrehozását; ugyanazon AppId meglévő telepítésénél a könyvtár és korábbi feladatválasztások megmaradnak, a telepítő kihagyja a már megadott választásokat. Frissítésből a segédprogram Inno Setupot csendes kapcsolókkal indítja; a Windows rendszerengedélykéréseit nem kerüli meg.
+- **Napló:** a motor konzolkimenete és az alkalmazás kapcsolata UTF-8-ra van konfigurálva, a felület Windows alatt Segoe UI betűkészletet használ. Az olyan, már korábban kérdőjellé alakult karakterek utólag nem rekonstruálhatók; az új bejegyzések javulásához Windows alatti ellenőrzés szükséges.
 
-**Korlát:** a Windows jogosultságkérései/UAC és bizonyos kritikus telepítési hibák továbbra is megjelenhetnek. A csendes frissítés az **új v0.5 és későbbi kiadásokból** induló frissítéseket érinti. A **v0.4 → v0.5** frissítést még a v0.4 régi frissítője indítja, ezért ez az átmenet kérhet megerősítést, és megjelenhet a telepítő varázslója.
+## Biztonság és korlátok
 
-## Fontos tudnivalók
+- Az alapmód továbbra is a **Próbaüzem**. Valós hozzáadáshoz vagy törléshez a felhasználó külön üzemmódot választ.
+- Fájltörlés csak a motor által korábban nyilvántartott, hash, név és mappa szerint egyező torrenteknél engedélyezett, két hiánytalan toplista-ellenőrzés után. Hiányos lista vagy bizonytalan állapot esetén nincs törlés.
+- A méretkorlát tizedes **GB**-ban értendő: 1 GB = 1 000 000 000 bájt. Üres mező = nincs méretkorlát.
+- A tárhelykorlát új torrentek hozzáadását akadályozza, **nem állítja le a már meglévő letöltéseket**, ezért a tényleges telítettség túllépheti a határt.
+- A böngészőprofilt és belépési adatokat a felhasználó helyi könyvtára tárolja, **ne töltsd fel a GitHubra**.
+- Régebbi verziók telepítésekor fennállhat beállítás- és adatkompatibilitási kockázat; a beállításokról automatikus mentés készül, de ez nem jelenti minden visszalépés garantált kompatibilitását.
 
-- A méretkorlát **továbbra is a .torrent metainfóból** származó teljes méretre vonatkozik. Az üres mező = nincs megadott korlát. Tizedes GB is használható, pl. `1,5`.
-- **Migráció:** a v0.4 `min_size_gib` és `max_size_gib` értékei pontos SI GB-ra konvertálódnak (10 GiB → 10.73741824 GB), így a régi tényleges határ nem változik. A következő mentéskor a régi mezők kikerülnek a felhasználói konfigurációból.
-- A v0.4-ben bekapcsolt, Torrent Managerhez tartozó Windows-felhasználói automatikus indítási bejegyzést a v0.5 indításkor megpróbálja eltávolítani.
-- A qBittorrent **önálló** Windows-indítási beállítását nem módosítja, és a qBittorrentet a Torrent Manager leállítása nem zárja be.
-- A beépített módok változatlanok: **Próbaüzem**, **Csak új torrentek hozzáadása**, **Hozzáadás és törlés (fájlokkal)**.
-- Fájltörlés csak a saját, korábban azonosított torrentekre engedélyezett, a hash, név, mappa és a teljes, két egymást követő sikeres toplista-ellenőrzés után. Hibás/hiányos lista esetén nincs törlés. Használj először Próbaüzemet és készíts biztonsági másolatot, mielőtt a törléses módot engedélyeznéd.
-- A lemezlimitet a program az új torrentek hozzáadása előtt ellenőrzi. **A már aktív letöltéseket nem állítja meg**, ezért a korlát nem garantálja a teljes lemezhasználat plafonját.
+## Telepítés és kiadás GitHub Desktopból
 
-## Windows-build a saját GitHub-repóban
+1. Bontsd ki a v0.6 forrás-ZIP-et. A **TorrentManager_v0.6 könyvtár tartalmát** másold a helyi `SuperKiller123/TorrentManager` GitHub-repó gyökerébe, a rejtett `.github` mappával és az `assets` könyvtárral együtt; a régi forrásfájlokat írd felül.
+2. GitHub Desktop: **Commit to main**, üzenet például `Torrent Manager v0.6.0`; majd **Push origin**.
+3. Ellenőrizd a Windows-build sikerét a [GitHub Actions](https://github.com/SuperKiller123/TorrentManager/actions) felületen. A kész **Actions Artifact** neve `TorrentManager-v0.6-Windows`; ebben lesz a Windows-telepítő, a hordozható ZIP és az ellenőrzőösszeg.
+4. **Először próbáld ki Windows alatt, Próbaüzemben**, ellenőrizd az F11-et, a qBittorrent háttérindítását, a magyar karaktereket, a telepítéskor megőrzött parancsikont és a telepítő visszaállítási funkcióit.
+5. Ha minden megfelelő, hozz létre `v0.6.0` címkéjű GitHub Release-t a `main` ágról. A címkére induló Actions feltölti a `TorrentManager-Setup-v0.6.0.exe` és `SHA256SUMS.txt` fájlokat a Release Assets alá. Ezután a telepített v0.5 alkalmazásból frissíthetsz.
 
-1. A ZIP-ben található **TorrentManager_v0.5 mappa tartalmát** (ne a teljes mappát) másold a GitHub Desktop helyi `TorrentManager` tárolójának **gyökerébe**. A `.github/workflows/build-windows.yml` is a gyökérbe kerüljön; a régi fájlokat felül kell írni.
-2. A felhasználói adatokat **ne** töltsd fel: `beallitasok.json`, `kezelt_torrentek.json`, `automatizalas.log`, `bithumen_bongeszo_profil`, illetve qBittorrent- vagy BitHuMen-jelszó nem kerülhet a repóba.
-3. GitHub Desktop → **Commit to main** (például `Torrent Manager v0.5.0`) → **Push origin**.
-4. Nyisd meg: https://github.com/SuperKiller123/TorrentManager/actions . A sikeres `main` build artifactja: `TorrentManager-v0.5-Windows`. Tartalmazza a telepítőt, a hordozható ZIP-et és a SHA256SUMS.txt ellenőrzőösszeget.
-5. **Előbb teszteld a telepítőt Próbaüzemben.** Csak ezután hozd létre a GitHub Release `v0.5.0` címkéjét a `main` ágról; a címke-build feltölti a kiadási fájlokat a Release-hez.
-6. Miután a Release-ben megjelent a `TorrentManager-Setup-v0.5.0.exe` és a `SHA256SUMS.txt`, a már telepített v0.4 alkalmazás **Frissítések** fülén kereshető az új kiadás. A v0.4 frissítője még kérhet jóváhagyást. A v0.5-re való átállás után a következő frissítés már csendes lehet.
+Az alkalmazás építéséhez GitHub Actions `windows-latest`, Python 3.13, PyInstaller, Playwright Chromium és Inno Setup 6 szükséges. A `build-windows.ps1` együttesen készíti a főprogramot, a motort, a bejelentkezési és frissítési segédalkalmazást, a hordozható kiadást és a telepítőt.
 
-A Windows-buildekhez GitHub Actions szükséges. A `build-windows.ps1` Windows alatt Python 3.13-mal elkészíti a GUI-t, a háttérmotort, a `TorrentUpdater.exe` segédet, a Chromiumot, a hordozható ZIP-et és (Inno Setup 6 használatával) a telepítőt.
+## Fejlesztői indítás és tesztek
 
-## Adatok és fejlesztői indítás
+```powershell
+python -m pip install -r requirements.txt
+python -m playwright install chromium
+python TorrentManager.py
+python -m unittest discover -s tests -v
+```
 
-A felhasználói állományok telepítéskor megmaradnak:
+A felhasználó adatai: `%LOCALAPPDATA%\TorrentManager\`. Fontos fájlok: `beallitasok.json`, `kezelt_torrentek.json`, `automatizalas.log`, `bithumen_bongeszo_profil`, illetve régebbi verzió telepítésekor `backups\`.
 
-- `%LOCALAPPDATA%\TorrentManager\beallitasok.json`
-- `%LOCALAPPDATA%\TorrentManager\kezelt_torrentek.json`
-- `%LOCALAPPDATA%\TorrentManager\automatizalas.log`
-- `%LOCALAPPDATA%\TorrentManager\bithumen_bongeszo_profil\`
-
-Pythonból: `python -m pip install -r requirements.txt`, `python -m playwright install chromium`, majd `python TorrentManager.py`.
-
-Offline regressziós tesztek: `python -m unittest discover -s tests -v`.
-
-**Tesztelési állapot:** a Python-tesztek és a Linux/Tkinter grafikus próbák lefutottak. Ebben a környezetben **nem készült Windows `.exe`**, és nem történt élő BitHuMen/qBittorrent- vagy Windows Inno Setup telepítési teszt. Ezeket az Actions után, a saját Windows gépeden ellenőrizd.
+**Validáció:** 38 offline regressziós teszt sikeres, virtuális kijelzőn Tkinter-GUI és témaváltási próba készült. **A jelenlegi Linux-környezetben Windows `.exe` nem állítható elő; éles qBittorrent/BitHuMen, Windows DWM és Inno Setup telepítési ellenőrzés nem történt.** Ezeket a GitHub Actions build és a saját Windows gépeden végzett teszt igazolhatja.

@@ -43,7 +43,7 @@ class V05SettingsTests(unittest.TestCase):
         self.assertEqual(a['mode'],'add')
 
     def test_version(self):
-        self.assertEqual(updater.VERSION,'0.5.0')
+        self.assertEqual(updater.VERSION,'0.6.0')
 
     def test_new_gui_does_not_expose_removed_controls(self):
         src=(Path(__file__).resolve().parents[1]/'TorrentManager.py').read_text(encoding='utf8')
@@ -52,8 +52,8 @@ class V05SettingsTests(unittest.TestCase):
         self.assertNotIn('self.stat_total',src)
         self.assertNotIn('"startup_windows"',src)
         self.assertNotIn('"launch_qbittorrent"',src)
-        self.assertIn('"Mutatás"',src)
-        self.assertIn('"Elrejtés"',src)
-        self.assertIn('"Frissítés letöltése és telepítése"',src)
+        self.assertIn("self.T('show')",src)
+        self.assertIn("self.T('hide')",src)
+        self.assertIn("self.T('install')",src)
 
 if __name__=='__main__': unittest.main()

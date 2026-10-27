@@ -55,9 +55,9 @@ class UpdateTests(unittest.TestCase):
 
     def test_check_latest(self):
         response = FakeResponse(json_data={
-            "tag_name": "v0.6.0", "html_url": "https://github.com/user/repo/releases/tag/v0.6.0",
+            "tag_name": "v0.7.0", "html_url": "https://github.com/user/repo/releases/tag/v0.7.0",
             "body": "Javítások", "assets": [
-                {"name": "TorrentManager-Setup-v0.6.0.exe", "browser_download_url": "https://github.com/user/repo/a"},
+                {"name": "TorrentManager-Setup-v0.7.0.exe", "browser_download_url": "https://github.com/user/repo/a"},
                 {"name": "SHA256SUMS.txt", "browser_download_url": "https://github.com/user/repo/b"},
             ]})
         rel = updater.check_latest("user/repo", session=FakeSession([response]))

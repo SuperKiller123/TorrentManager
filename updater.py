@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 import requests
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 INSTALLER_PATTERN = re.compile(r"^TorrentManager-Setup-v[0-9]+(?:\.[0-9]+){1,3}\.exe$", re.I)
 CHECKSUM_NAME = "SHA256SUMS.txt"
@@ -57,6 +57,52 @@ def check_latest(repository, current=VERSION, session=None):
         "installer": installer,
         "checksums": sums,
     }
+
+
+
+def list_releases(repository, session=None):
+    """List verified-installable current and historical GitHub releases.
+
+    Reject prereleases and malformed/mismatched installer versions; only use
+    GitHub release download URLs and the signed-in-release SHA256 manifest.
+    """
+    repository = normalize_repo(repository)
+    http = session or requests
+    url = f"https://api.github.com/repos/{repository}/releases?per_page=100"
+    try:
+        response = http.get(url, headers={"Accept":"application/vnd.github+json",
+                                           "User-Agent":"TorrentManager-Updater"}, timeout=25)
+        if response.status_code == 404:
+            raise UpdateError("Nem találhatók nyilvános GitHub-kiadások.")
+        response.raise_for_status()
+        entries = response.json()
+    except requests.RequestException as exc:
+        raise UpdateError(f"A kiadások lekérdezése sikertelen: {exc}") from exc
+    if not isinstance(entries, list):
+        raise UpdateError("Érvénytelen kiadáslista a GitHubtól.")
+    releases = []
+    seen = set()
+    for entry in entries:
+        if not isinstance(entry, dict) or entry.get('draft') or entry.get('prerelease'):
+            continue
+        tag = str(entry.get('tag_name') or '')
+        try:
+            version = parse_version(tag)
+        except UpdateError:
+            continue
+        if version in seen:
+            continue
+        seen.add(version)
+        assets = entry.get('assets') or []
+        installer = next((a for a in assets if isinstance(a, dict)
+                 and a.get('name','').casefold() == f"torrentmanager-setup-v{tag.lstrip('vV')}.exe".casefold()), None)
+        sums = next((a for a in assets if isinstance(a, dict)
+                     and a.get('name') == CHECKSUM_NAME), None)
+        releases.append({'version': 'v' + tag.lstrip('vV'), 'newer': version > parse_version(VERSION),
+                         'url': entry.get('html_url',''), 'notes': str(entry.get('body',''))[:1600],
+                         'installer': installer, 'checksums': sums})
+    releases.sort(key=lambda r: parse_version(r['version']), reverse=True)
+    return releases
 
 
 def valid_asset_url(asset):
