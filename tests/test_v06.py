@@ -36,7 +36,7 @@ class Session:
 
 class V06Tests(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(VERSION, '0.6.0')
+        self.assertEqual(VERSION, '0.7')
     def test_12_languages_with_hungarian_and_german(self):
         self.assertEqual(len(LANGUAGES), 12)
         for code in LANGUAGES:
@@ -80,7 +80,7 @@ class V06Tests(unittest.TestCase):
                        release('0.4.0'),release('0.8.0',draft=True),
                        release('0.7.0',prerelease=True),release('0.5.0',files=False)]))
         items=list_releases('author/repo',session=session)
-        self.assertEqual([item['version'] for item in items],['v0.6.0','v0.5.0','v0.4.0','v0.3.0'])
+        self.assertEqual([item['version'] for item in items],['v0.6','v0.5','v0.4','v0.3'])
         self.assertIsNone(items[1]['installer'])
         self.assertIsNotNone(items[2]['installer'])
         self.assertTrue(all(not item['newer'] for item in items))
@@ -88,8 +88,8 @@ class V06Tests(unittest.TestCase):
         ins=(Path(__file__).resolve().parents[1]/'installer.iss').read_text(encoding='utf-8')
         self.assertIn('UsePreviousTasks=yes',ins)
         self.assertIn('ShouldSkipPage(PageID: Integer)',ins)
-        self.assertIn('LanguagePage.Add',ins)
-        self.assertIn('RegWriteStringValue',ins)
+        self.assertNotIn('CreateInputOptionPage',ins)
+        self.assertIn('Key: "language"; String: "{language}"',ins)
     def test_start_requires_webui(self):
         src=(Path(__file__).resolve().parents[1]/'TorrentManager.py').read_text(encoding='utf-8')
         self.assertIn('if not self.connected:',src)

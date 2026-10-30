@@ -18,8 +18,9 @@ from paths import BASE, SETTINGS, DATA_DIR, LOG, migrate_old_data, find_playwrig
 from policy import GITHUB_REPO, normalize_settings, validate_settings
 from updater import VERSION, list_releases, download_installer, UpdateError, parse_version
 from localization import tr, LANGUAGES
-from webui import check_webui
-from windows_integration import remove_legacy_windows_startup, launch_qbittorrent, apply_windows_titlebar
+from webui import check_webui, webui_session, read_telemetry
+from windows_integration import (launch_qbittorrent, apply_windows_titlebar,
+                                 set_windows_startup, set_desktop_shortcut, FullscreenController)
 
 DARK = dict(bg='#0C1220', sidebar='#111B2B', panel='#151F31', panel_hi='#1D2B42',
             input='#0F1A2B', text='#EEF5FF', muted='#99ADC4', line='#29374C',
@@ -46,6 +47,16 @@ def read_settings():
                 saved['language'] = winreg.QueryValueEx(key, 'Language')[0]
         except (OSError, ImportError):
             pass
+    defaults_file = BASE / 'install-defaults.ini'
+    if defaults_file.is_file():
+        import configparser
+        defaults = configparser.ConfigParser()
+        defaults.read(defaults_file, encoding='utf-8-sig')
+        if defaults.has_section('Settings'):
+            for key in ('language', 'startup', 'close_to_tray', 'desktopicon'):
+                if key not in saved and defaults.has_option('Settings', key):
+                    saved[key] = (defaults.get('Settings', key) if key == 'language'
+                                  else defaults.getboolean('Settings', key))
     return normalize_settings(saved)
 
 
@@ -71,6 +82,7 @@ class App:
         self.proc = None
         self.running = False
         self.closed = False
+        self.tray = None
         self.connected = False
         self.bithumen_ready = False
         self.connection_message = 'check_qb'
@@ -81,6 +93,8 @@ class App:
         self.sections = {}
         self.log_lines = []
         self.releases = []
+        self.speed_history = []
+        self.live_torrents = tk.StringVar(value='–')
         self.release_by_version = {}
         self.downloading = False
         self.update_message = tk.StringVar(value='')
@@ -99,28 +113,34 @@ class App:
         self._load_log_tail()
         root.title(' ')  # no app version or name in caption: branded sidebar is the title
         root.geometry('1200x820')
-        root.minsize(880, 630)
+        root.minsize(1000, 700)
+        try:
+            root.iconbitmap(str(Path(getattr(sys, '_MEIPASS', BASE)) / 'assets' / 'app_icon.ico'))
+        except tk.TclError:
+            pass
         try:
             root.state('zoomed')  # maximize into usable work area, not F11 fullscreen
         except tk.TclError:
             root.geometry('1200x820')
         root.bind('<F11>', self.toggle_fullscreen)
+        self.fullscreen = FullscreenController(root, lambda: apply_windows_titlebar(
+            root, theme_is_dark(self.cfg['theme']), P['bg']))
         root.bind_all('<MouseWheel>', self._wheel_active)
         root.bind_all('<Button-4>', lambda _event: self._wheel_active(None, -3))
         root.bind_all('<Button-5>', lambda _event: self._wheel_active(None, 3))
         root.protocol('WM_DELETE_WINDOW', self.close)
         self._render('dashboard')
         threading.Thread(target=self._try_start_qb, daemon=True).start()
-        threading.Thread(target=self._remove_old_startup, daemon=True).start()
         threading.Thread(target=self._webui_loop, daemon=True).start()
         root.after(120, self.poll)
         root.after(15000, self._periodic_stats)
+        root.after(500, self.check_updates)
 
     def T(self, key):
         return tr(self.cfg.get('language', 'hu'), key)
 
     def toggle_fullscreen(self, _event=None):
-        self.root.attributes('-fullscreen', not bool(self.root.attributes('-fullscreen')))
+        self.fullscreen.toggle()
         return 'break'  # Escape is intentionally NOT bound to fullscreen
 
     def _render(self, page):
@@ -304,14 +324,16 @@ class App:
         self.start_btn.pack(side='left', padx=4)
         self.stop_btn = self._button(actions, self.T('stop'), self.stop, 'secondary', True, 'disabled')
         self.stop_btn.pack(side='left', padx=4)
-        interior, self.dashboard_canvas = self._scroll_page(page)
+        interior = tk.Frame(page, bg=P['bg'])
+        interior.pack(fill='both', expand=True)
+        self.dashboard_canvas = None
         metrics = tk.Frame(interior, bg=P['bg'])
         metrics.pack(fill='x', pady=(0, 9))
         for i in range(4):
             metrics.columnconfigure(i, weight=1, uniform='metric')
         self.metric_auto = tk.StringVar()
-        cards = [(self.T('automation'), self.metric_auto), (self.T('space'), self.stat_disk),
-                 (self.T('mode'), self.home_mode), (self.T('connection'), self.webui_status)]
+        cards = [(self.T('automation'), self.metric_auto), (self.T('total'), self.live_torrents),
+                 (self.T('mode'), self.home_mode), (self.T('next'), self.next_check)]
         for i, (head, var) in enumerate(cards):
             metric = self._metric(metrics, head, var)
             if i == 3:
@@ -328,7 +350,7 @@ class App:
         self.mini_min = tk.StringVar(value='–')
         self.mini_max = tk.StringVar(value='–')
         for i, (title, variable) in enumerate([
-            (self.T('total'), self.mini_total), (self.T('interval'), self.mini_interval),
+            (self.T('total_n'), self.mini_total), (self.T('interval'), self.mini_interval),
             (self.T('minsize'), self.mini_min), (self.T('maxsize'), self.mini_max)]):
             card = self._card(extra, 11)
             card.grid(row=0, column=i, sticky='nsew', padx=(0, 5) if i < 3 else 0)
@@ -346,14 +368,16 @@ class App:
         self.disk_track.pack(fill='x', pady=(12, 5))
         self.disk_track.bind('<Configure>', lambda _: self._paint_disk_bar())
         more = tk.Frame(interior, bg=P['bg'])
-        more.pack(fill='x', pady=(0, 9))
+        more.pack(fill='both', expand=True, pady=(0, 9))
+        more.rowconfigure(0, weight=1)
         for i in range(2):
             more.columnconfigure(i, weight=1, uniform='more')
         limits = self._card(more)
         limits.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
-        self._label(limits, self.T('limits'), 12, bold=True).pack(anchor='w', pady=(0, 8))
-        tk.Label(limits, textvariable=self.home_details, bg=P['panel'], fg=P['text'],
-                 font=(FONT, 10), anchor='nw', justify='left', wraplength=350).pack(fill='both', expand=True)
+        self._label(limits, self.T('transfer'), 12, bold=True).pack(anchor='w')
+        self.speed_chart = tk.Canvas(limits, height=70, bg=P['panel'], highlightthickness=0)
+        self.speed_chart.pack(fill='both', expand=True)
+        self.speed_chart.bind('<Configure>', lambda _: self._paint_speed())
         system = self._card(more)
         system.grid(row=0, column=1, sticky='nsew')
         self._label(system, self.T('connection'), 12, bold=True).pack(anchor='w', pady=(0, 7))
@@ -363,17 +387,10 @@ class App:
         self.webui_indicator.pack(anchor='w', pady=2)
         self.bit_indicator = self._label(system, '○  BitHuMen', 10, 'muted')
         self.bit_indicator.pack(anchor='w', pady=2)
-        future = self._card(interior)
-        future.pack(fill='x', pady=(0, 9))
-        row = tk.Frame(future, bg=P['panel'])
-        row.pack(fill='x')
-        self._label(row, self.T('next'), 10, bold=True).pack(side='left')
-        tk.Label(row, textvariable=self.next_check, fg=P['text'], bg=P['panel'],
-                 font=(FONT, 11, 'bold')).pack(side='right')
         logcard = self._card(interior)
         logcard.pack(fill='both', expand=True, pady=(0, 9))
         self._label(logcard, self.T('recent'), 12, bold=True).pack(anchor='w', pady=(0, 8))
-        self.preview = tk.Text(logcard, height=9, bg=P['input'], fg=P['text'], relief='flat',
+        self.preview = tk.Text(logcard, height=3, bg=P['input'], fg=P['text'], relief='flat',
                                bd=0, padx=12, pady=11, wrap='word',
                                font=(FONT, 10), state='disabled')
         self.preview.pack(fill='both', expand=True)
@@ -462,11 +479,18 @@ class App:
         choices = list(LANGUAGES.items())
         codes = [code for code, _ in choices]
         self.language_box = ttk.Combobox(r2, state='readonly', style='TM.TCombobox',
-                                          values=[label for _, label in choices], width=24)
+                                          values=[label for _, label in choices], width=24, height=12)
+        self.language_box.bind('<MouseWheel>', lambda _: 'break')
+        self.language_box.bind('<Button-4>', lambda _: 'break')
+        self.language_box.bind('<Button-5>', lambda _: 'break')
         self.language_box.current(codes.index(self.cfg.get('language', 'hu')))
         self.language_box.pack(side='left', fill='x', expand=True)
         self.language_box.bind('<<ComboboxSelected>>', lambda _: self.vars['language'].set(codes[self.language_box.current()]))
         self._label(appearance, self.T('language_note'), 9, 'muted').pack(anchor='w')
+        for key in ('startup', 'close_to_tray', 'desktopicon'):
+            self.vars[key] = tk.BooleanVar(value=self.cfg.get(key, False))
+            tk.Checkbutton(appearance, text=self.T(key), variable=self.vars[key],
+                           bg=P['panel'], fg=P['text'], selectcolor=P['input']).pack(anchor='w')
         self._saved_signature = self._form_signature()
         for variable in self.vars.values():
             variable.trace_add('write', lambda *_: self._sync_dirty())
@@ -628,7 +652,7 @@ class App:
     def _validated_settings(self):
         config = dict(self.cfg)
         for key, var in self.vars.items():
-            config[key] = var.get().strip() if isinstance(var, tk.StringVar) else var.get()
+            config[key] = var.get().strip() if isinstance(var, tk.StringVar) and key != 'qb_password' else var.get()
         config = validate_settings(config)
         if not str(config['qb_url']).strip():
             raise ValueError('Hiányzik a WebUI címe.')
@@ -646,6 +670,10 @@ class App:
                     return False
             changed_view = (new['theme'], new['language']) != (self.cfg.get('theme'), self.cfg.get('language'))
             changed_webui = any(new[k] != self.cfg.get(k) for k in ('qb_url','qb_username','qb_password'))
+            if new['startup'] != self.cfg['startup']:
+                set_windows_startup(new['startup'])
+            if new['desktopicon'] != self.cfg['desktopicon']:
+                set_desktop_shortcut(new['desktopicon'])
             DATA_DIR.mkdir(parents=True, exist_ok=True)
             tmp = SETTINGS.with_suffix('.json.tmp')
             tmp.write_text(json.dumps(new, indent=2, ensure_ascii=False), encoding='utf-8')
@@ -707,7 +735,13 @@ class App:
             if signature != last_signature:
                 last_signature = signature
             try:
-                ready, message = check_webui(*signature)
+                with webui_session(signature[0]) as http:
+                    ready, message = check_webui(*signature, session=http)
+                    if ready:
+                        try:
+                            self.events.put(('telemetry', (signature, read_telemetry(http, signature[0]))))
+                        except Exception:
+                            pass
                 self.events.put(('webui', (signature, ready, message)))
             except Exception as exc:
                 self.events.put(('webui', (signature, False, 'not_ready')))
@@ -788,6 +822,24 @@ class App:
         except (OSError, subprocess.TimeoutExpired) as exc:
             messagebox.showerror('Leállítási hiba', str(exc), parent=self.root)
 
+    def _paint_speed(self):
+        canvas = self.speed_chart
+        canvas.delete('all')
+        width, height = canvas.winfo_width(), canvas.winfo_height()
+        if not self.speed_history:
+            canvas.create_text(width/2,height/2, text=self.T('unavailable'), fill=P['muted'])
+            return
+        maximum = max(1, max(max(pair) for pair in self.speed_history))
+        for index, color in [(0,P['blue']), (1,P['green'])]:
+            points = []
+            for i, pair in enumerate(self.speed_history):
+                points.extend((10 + i * max(1,width-20)/max(1,len(self.speed_history)-1),
+                               height-8 - pair[index]/maximum*max(1,height-34)))
+            if len(points) >= 4:
+                canvas.create_line(*points, fill=color, width=2, smooth=True)
+        down, up = self.speed_history[-1]
+        canvas.create_text(8,8, anchor='nw', text=f'↓ {down/1e6:.2f} MB/s   ↑ {up/1e6:.2f} MB/s', fill=P['text'])
+
     def _paint_disk_bar(self):
         if not hasattr(self, 'disk_track') or not self.disk_track.winfo_exists():
             return
@@ -864,12 +916,6 @@ class App:
         except Exception as exc:
             self.events.put(('line', 'qBittorrent indítási hiba: ' + str(exc)))
 
-    def _remove_old_startup(self):
-        try:
-            remove_legacy_windows_startup()
-        except Exception as exc:
-            self.events.put(('line', 'Korábbi automatikus indítás eltávolítása sikertelen: ' + str(exc)))
-
     def _releases_to_combobox(self):
         if not hasattr(self, 'versions_box'):
             return
@@ -884,7 +930,7 @@ class App:
         release = self.release_by_version.get(self.version_choice.get())
         enabled = (not self.downloading and release is not None and release['installer'] is not None
                    and release['checksums'] is not None
-                   and parse_version(release['version']) != parse_version(VERSION))
+                   )
         self.install_button.configure(state='normal' if enabled else 'disabled',
                                       bg=P['blue'] if enabled else P['line'])
 
@@ -951,6 +997,8 @@ class App:
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), close_fds=True)
             self.closed = True
+            if self.tray:
+                self.tray.stop()
             self.root.destroy()
         except (OSError, RuntimeError) as exc:
             self.update_message.set('Telepítő indítási hiba: ' + str(exc))
@@ -962,7 +1010,14 @@ class App:
         try:
             while True:
                 kind, data = self.events.get_nowait()
-                if kind == 'line':
+                if kind == 'restore':
+                    self.root.deiconify()
+                    self.root.lift()
+                elif kind == 'exit':
+                    self.exit()
+                    if self.closed:
+                        return
+                elif kind == 'line':
                     if 'BitHuMen bejelentkezés ellenőrizve' in data:
                         self.bithumen_ready = True
                         self._bit_status()
@@ -986,6 +1041,12 @@ class App:
                         self._connection_update(connected, message)
                         if previous != connected:
                             self.append('WebUI kapcsolat létrejött.' if connected else 'WebUI kapcsolat megszakadt.')
+                elif kind == 'telemetry':
+                    signature, snapshot = data
+                    if signature == tuple(self.cfg.get(k) for k in ('qb_url','qb_username','qb_password')):
+                        self.live_torrents.set(str(snapshot['total']))
+                        self.speed_history = (self.speed_history + [(snapshot['download'],snapshot['upload'])])[-60:]
+                        self._paint_speed()
                 elif kind == 'releases_ok':
                     self.releases = data
                     self._releases_to_combobox()
@@ -1016,11 +1077,30 @@ class App:
             messagebox.showinfo('Naplók', str(DATA_DIR), parent=self.root)
 
     def close(self):
+        if self.cfg.get('close_to_tray'):
+            try:
+                if self.tray is None:
+                    import pystray
+                    from PIL import Image
+                    self.tray = pystray.Icon('TorrentManager', Image.open(Path(getattr(sys, '_MEIPASS', BASE)) / 'assets' / 'app_icon.ico'),
+                        'Torrent Manager', menu=pystray.Menu(
+                            pystray.MenuItem(self.T('show'), lambda *_: self.events.put(('restore', None)), default=True),
+                            pystray.MenuItem(self.T('exit'), lambda *_: self.events.put(('exit', None)))))
+                    self.tray.run_detached()
+                self.root.withdraw()
+                return
+            except Exception as exc:
+                self.append(str(exc))
+        self.exit()
+
+    def exit(self):
         if self.proc and self.proc.poll() is None:
             if not messagebox.askyesno('Kilépés', 'Leállítsuk az automatizálást is?', parent=self.root):
                 return
             self.stop()
         self.closed = True
+        if self.tray:
+            self.tray.stop()
         self.root.destroy()
 
 
@@ -1028,5 +1108,13 @@ if __name__ == '__main__':
     migrate_old_data()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     root = tk.Tk()
-    App(root)
-    root.mainloop()
+    cfg = read_settings()
+    if not cfg.get('setup_complete'):
+        from setup_wizard import run_setup
+        threading.Thread(target=lambda: launch_qbittorrent(), daemon=True).start()
+        cfg = run_setup(root, cfg)
+    if cfg:
+        App(root)
+        root.mainloop()
+    else:
+        root.destroy()

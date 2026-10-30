@@ -1,21 +1,20 @@
 #define MyAppName "Torrent Manager"
-#define MyAppVersion "0.6.0"
-#define MyAppExeName "TorrentManager.exe"
-
+#define MyAppVersion "0.7"
 [Setup]
 AppId={{4D0F0B02-0C6E-4C4C-9DFA-DBDAE8A15F5F}
 AppName={#MyAppName}
+AppVerName={#MyAppName}
 AppVersion={#MyAppVersion}
-AppPublisher=Torrent Manager Project
-DefaultDirName={localappdata}\Programs\Torrent Manager
+DefaultDirName={autopf}\Torrent Manager
 DefaultGroupName=Torrent Manager
 OutputDir=dist\installer
-OutputBaseFilename=TorrentManager-Setup-v0.6.0
+OutputBaseFilename=TorrentManager-Setup-v0.7
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-PrivilegesRequired=lowest
+PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\TorrentManager.exe
 SetupIconFile=assets\app_icon.ico
 CloseApplications=yes
@@ -24,88 +23,116 @@ UsePreviousAppDir=yes
 UsePreviousGroup=yes
 UsePreviousTasks=yes
 UsePreviousLanguage=yes
+ShowLanguageDialog=yes
+LanguageDetectionMethod=none
 
+; All Setup text is consistently English, as explicitly accepted.
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "hungarian"; MessagesFile: "compiler:Languages\Hungarian.isl"
-Name: "german"; MessagesFile: "compiler:Languages\German.isl"
-Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
-Name: "french"; MessagesFile: "compiler:Languages\French.isl"
-Name: "portuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
-Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
-
+Name: "en"; MessagesFile: "compiler:Default.isl"
+Name: "zh"; MessagesFile: "compiler:Default.isl"
+Name: "hi"; MessagesFile: "compiler:Default.isl"
+Name: "es"; MessagesFile: "compiler:Default.isl"
+Name: "fr"; MessagesFile: "compiler:Default.isl"
+Name: "ar"; MessagesFile: "compiler:Default.isl"
+Name: "bn"; MessagesFile: "compiler:Default.isl"
+Name: "pt"; MessagesFile: "compiler:Default.isl"
+Name: "ru"; MessagesFile: "compiler:Default.isl"
+Name: "ur"; MessagesFile: "compiler:Default.isl"
+Name: "hu"; MessagesFile: "compiler:Default.isl"
+Name: "de"; MessagesFile: "compiler:Default.isl"
+[LangOptions]
+en.LanguageName=English
+zh.LanguageName=中文（简体）
+hi.LanguageName=हिन्दी
+es.LanguageName=Español
+fr.LanguageName=Français
+ar.LanguageName=العربية
+bn.LanguageName=বাংলা
+pt.LanguageName=Português
+ru.LanguageName=Русский
+ur.LanguageName=اردو
+hu.LanguageName=Magyar
+de.LanguageName=Deutsch
 [Tasks]
-Name: "desktopicon"; Description: "Desktop shortcut / Asztali parancsikon"; GroupDescription: "Additional tasks / További lehetőségek:"; Flags: unchecked
-
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Options:"; Flags: unchecked
+Name: "startup"; Description: "Start Torrent Manager with Windows"; Flags: unchecked
+Name: "close_to_tray"; Description: "Keep running in the notification area when closing the window"; Flags: unchecked
 [Files]
 Source: "dist\TorrentManager\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
 [Icons]
 Name: "{autoprograms}\Torrent Manager"; Filename: "{app}\TorrentManager.exe"
-Name: "{autodesktop}\Torrent Manager"; Filename: "{app}\TorrentManager.exe"; Tasks: desktopicon
-
+[INI]
+Filename: "{app}\install-defaults.ini"; Section: "Settings"; Key: "language"; String: "{language}"
+Filename: "{app}\install-defaults.ini"; Section: "Settings"; Key: "desktopicon"; String: "{code:DesktopValue}"
+Filename: "{app}\install-defaults.ini"; Section: "Settings"; Key: "startup"; String: "{code:StartupValue}"
+Filename: "{app}\install-defaults.ini"; Section: "Settings"; Key: "close_to_tray"; String: "{code:TrayValue}"
+[Run]
+Filename: "{app}\TorrentManager.exe"; Description: "Launch Torrent Manager"; Flags: nowait postinstall skipifsilent runasoriginaluser
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}\browsers"
+Type: files; Name: "{app}\install-defaults.ini"
+Type: files; Name: "{app}\beallitasok.json"
+Type: files; Name: "{app}\kezelt_torrentek.json"
+Type: files; Name: "{app}\automatizalas.log"
+Type: filesandordirs; Name: "{app}\bithumen_bongeszo_profil"
+Type: filesandordirs; Name: "{app}\__pycache__"
+Type: dirifempty; Name: "{app}"
 [Code]
-var
-  LanguagePage: TInputOptionWizardPage;
-  PreviouslyInstalled: Boolean;
-
-function InitializeSetup: Boolean;
-var
-  Value: String;
+function DesktopValue(Param: String): String;
 begin
-  PreviouslyInstalled := RegQueryStringValue(HKCU,
-    'Software\Microsoft\Windows\CurrentVersion\Uninstall\{4D0F0B02-0C6E-4C4C-9DFA-DBDAE8A15F5F}_is1',
-    'UninstallString', Value) or RegQueryStringValue(HKLM,
-    'Software\Microsoft\Windows\CurrentVersion\Uninstall\{4D0F0B02-0C6E-4C4C-9DFA-DBDAE8A15F5F}_is1',
-    'UninstallString', Value);
-  Result := True;
+  if WizardIsTaskSelected('desktopicon') then Result := 'true' else Result := 'false';
 end;
-
-function IsUpgrade: Boolean;
+function StartupValue(Param: String): String;
 begin
-  Result := PreviouslyInstalled;
+  if WizardIsTaskSelected('startup') then Result := 'true' else Result := 'false';
 end;
-
-procedure InitializeWizard;
+function TrayValue(Param: String): String;
 begin
-  if not IsUpgrade then begin
-    LanguagePage := CreateInputOptionPage(wpSelectDir,
-      'Application language / Alkalmazás nyelve',
-      'Select the language for the application / Válaszd ki a program nyelvét',
-      'You can change the language later in Settings. / Később is módosíthatod a Beállításokban.',
-      True, False);
-    LanguagePage.Add('English');
-    LanguagePage.Add('中文（简体）');
-    LanguagePage.Add('हिन्दी');
-    LanguagePage.Add('Español');
-    LanguagePage.Add('Français');
-    LanguagePage.Add('العربية');
-    LanguagePage.Add('বাংলা');
-    LanguagePage.Add('Português');
-    LanguagePage.Add('Русский');
-    LanguagePage.Add('اردو');
-    LanguagePage.Add('Magyar');
-    LanguagePage.Add('Deutsch');
-    LanguagePage.SelectedValueIndex := 10;
-  end;
+  if WizardIsTaskSelected('close_to_tray') then Result := 'true' else Result := 'false';
 end;
-
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
-  Result := IsUpgrade and ((PageID = wpSelectTasks) or
-    (PageID = wpSelectDir) or (PageID = wpSelectProgramGroup));
+  Result := (GetPreviousData('Installed', '') = 'yes') and
+    ((PageID = wpSelectTasks) or (PageID = wpSelectDir) or (PageID = wpSelectProgramGroup));
 end;
-
-procedure CurStepChanged(CurStep: TSetupStep);
-var
-  Codes: array[0..11] of String;
+procedure RegisterPreviousData(PreviousDataKey: Integer);
 begin
-  if (CurStep = ssPostInstall) and (not IsUpgrade) then begin
-    Codes[0] := 'en'; Codes[1] := 'zh'; Codes[2] := 'hi';
-    Codes[3] := 'es'; Codes[4] := 'fr'; Codes[5] := 'ar';
-    Codes[6] := 'bn'; Codes[7] := 'pt'; Codes[8] := 'ru';
-    Codes[9] := 'ur'; Codes[10] := 'hu'; Codes[11] := 'de';
-    RegWriteStringValue(HKCU, 'Software\TorrentManager', 'Language',
-      Codes[LanguagePage.SelectedValueIndex]);
+  SetPreviousData(PreviousDataKey, 'Installed', 'yes');
+end;
+procedure CleanProfile(Profile: String);
+var
+  Integration, Shortcut: String;
+begin
+  if (Profile <> '') and DirExists(Profile) then begin
+    StringChangeEx(Profile, '%SystemDrive%', GetEnv('SystemDrive'), True);
+    Integration := Profile + '\AppData\Local\TorrentManager\windows.ini';
+    Shortcut := GetIniString('Windows', 'DesktopShortcut', '', Integration);
+    if CompareText(ExtractFileName(Shortcut), 'Torrent Manager.lnk') = 0 then DeleteFile(Shortcut);
+    Shortcut := GetIniString('Windows', 'StartupShortcut', '', Integration);
+    if CompareText(ExtractFileName(Shortcut), 'Torrent Manager.lnk') = 0 then DeleteFile(Shortcut);
+    DelTree(Profile + '\AppData\Local\TorrentManager', True, True, True);
+    DelTree(Profile + '\AppData\Roaming\TorrentManager', True, True, True);
+    DeleteFile(Profile + '\Desktop\Torrent Manager.lnk');
+    DeleteFile(Profile + '\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\Torrent Manager.lnk');
+  end;
+end;
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Names: TArrayOfString;
+  I: Integer;
+  Profile: String;
+begin
+  if CurUninstallStep = usPostUninstall then begin
+    if RegGetSubkeyNames(HKLM, 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList', Names) then
+      for I := 0 to GetArrayLength(Names)-1 do
+        if RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\' + Names[I], 'ProfileImagePath', Profile) then
+          CleanProfile(Profile);
+    if RegGetSubkeyNames(HKU, '', Names) then
+      for I := 0 to GetArrayLength(Names)-1 do begin
+        RegDeleteKeyIncludingSubkeys(HKU, Names[I] + '\Software\TorrentManager');
+        RegDeleteValue(HKU, Names[I] + '\Software\Microsoft\Windows\CurrentVersion\Run', 'TorrentManager');
+      end;
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\TorrentManager');
+    RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'TorrentManager');
   end;
 end;

@@ -24,3 +24,9 @@ A kiadás a 18 felmerült fejlesztési kérés alapján készült, a következő
 ## Tesztelés
 
 38 offline Python-teszt és Tkinter GUI-smoke-teszt sikeres. Windows build, Windows-tálcás viselkedés, Inno Setup és élő BitHuMen/qBittorrent teszt még szükséges a kiadás jóváhagyásához.
+
+## v0.7
+
+Egyszeri, 12 nyelvű alkalmazásnyelv-választás; egységes angol telepítő; Program Files + admin; első beállítóvarázsló valódi kapcsolatteszt mellett; helyi proxy megkerülése; közös WebUI-munkamenet a motorral; tálcaikon és Startup-parancsikon; automatikus verziólekérés, újratelepítés, telepítési könyvtár megtartása és UAC-s frissítési segéd; nem görgethető dashboard élő átviteli grafikonnal; monitorhoz kötött F11; saját adatok és integrációk eltávolítási szabályai.
+
+A bizonyított teszteket és a fennmaradó korlátokat lásd: TESZTELES-v0.7.md.

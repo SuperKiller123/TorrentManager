@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 import requests
 
-VERSION = "0.6.0"
+VERSION = "0.7"
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 INSTALLER_PATTERN = re.compile(r"^TorrentManager-Setup-v[0-9]+(?:\.[0-9]+){1,3}\.exe$", re.I)
 CHECKSUM_NAME = "SHA256SUMS.txt"
@@ -21,7 +21,15 @@ def parse_version(value):
     value = value.strip().lstrip("vV")
     if not re.fullmatch(r"\d+(?:\.\d+){1,3}", value):
         raise UpdateError("Nem értelmezhető verziószám: " + value)
-    return tuple(int(part) for part in value.split("."))
+    parts = tuple(int(part) for part in value.split("."))
+    return parts + (0,) * (4 - len(parts))
+
+
+def display_version(value):
+    parts = str(value).lstrip('vV').split('.')
+    while len(parts) > 2 and parts[-1] == '0':
+        parts.pop()
+    return 'v' + '.'.join(parts)
 
 
 def normalize_repo(value):
@@ -98,7 +106,7 @@ def list_releases(repository, session=None):
                  and a.get('name','').casefold() == f"torrentmanager-setup-v{tag.lstrip('vV')}.exe".casefold()), None)
         sums = next((a for a in assets if isinstance(a, dict)
                      and a.get('name') == CHECKSUM_NAME), None)
-        releases.append({'version': 'v' + tag.lstrip('vV'), 'newer': version > parse_version(VERSION),
+        releases.append({'version': display_version(tag), 'newer': version > parse_version(VERSION),
                          'url': entry.get('html_url',''), 'notes': str(entry.get('body',''))[:1600],
                          'installer': installer, 'checksums': sums})
     releases.sort(key=lambda r: parse_version(r['version']), reverse=True)

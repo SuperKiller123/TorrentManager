@@ -4,6 +4,7 @@ import json, os, re, time, shutil, logging, getpass, sys
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, parse_qs, urlencode, urlunparse
 import requests
+from webui import webui_session
 from playwright.sync_api import sync_playwright
 
 from paths import SETTINGS as CFG, STATE, PROFILE, LOG, DATA_DIR, migrate_old_data, find_playwright_browsers
@@ -38,13 +39,18 @@ def config():
  return c
 
 def qb_login(c):
- s=requests.Session()
+ s=webui_session(c['qb_url'])
  s.headers["Referer"]=c["qb_url"].rstrip("/")+"/"
  pw=c["qb_password"] or getpass.getpass("qBittorrent Web UI jelszó: ")
- r=s.post(c["qb_url"].rstrip("/")+"/api/v2/auth/login",
-          data={"username":c["qb_username"],"password":pw},timeout=20)
+ try:
+  r=s.post(c["qb_url"].rstrip("/")+"/api/v2/auth/login",
+           data={"username":c["qb_username"],"password":pw},timeout=20)
+ except requests.RequestException:
+  s.close()
+  raise
  if not (r.status_code in (200,204) and r.text.strip().lower() in ("","ok.")):
-  raise RuntimeError(f"qBittorrent bejelentkezés sikertelen: HTTP {r.status_code} {r.text[:100]}")
+  s.close()
+  raise RuntimeError(f"qBittorrent bejelentkezés sikertelen: HTTP {r.status_code}")
  return s
 def api(s,c,method,path,**kwargs):
  r=s.request(method,c["qb_url"].rstrip("/")+"/api/v2/"+path,timeout=45,**kwargs)
@@ -381,6 +387,8 @@ def main():
   try:
    while True:
     try:
+     s.close()
+     s=qb_login(c)
      wait_for_bithumen_login(page,c)
      cycle(page,s,c,state)
     except Exception as e:

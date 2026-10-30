@@ -10,6 +10,40 @@ import sys
 from pathlib import Path
 
 
+def run_elevated(installer, flags, timeout=900):
+    """Elevate only Setup, wait for its real exit status; keep helper unelevated."""
+    if os.name != 'nt':
+        return subprocess.run([str(installer)] + flags, timeout=timeout).returncode
+    import ctypes
+    from ctypes import wintypes
+    class SHELLEXECUTEINFO(ctypes.Structure):
+        _fields_ = [('cbSize',wintypes.DWORD),('fMask',wintypes.ULONG),('hwnd',wintypes.HWND),
+            ('lpVerb',wintypes.LPCWSTR),('lpFile',wintypes.LPCWSTR),('lpParameters',wintypes.LPCWSTR),
+            ('lpDirectory',wintypes.LPCWSTR),('nShow',ctypes.c_int),('hInstApp',wintypes.HINSTANCE),
+            ('lpIDList',ctypes.c_void_p),('lpClass',wintypes.LPCWSTR),('hkeyClass',wintypes.HKEY),
+            ('dwHotKey',wintypes.DWORD),('hIcon',wintypes.HANDLE),('hProcess',wintypes.HANDLE)]
+    info = SHELLEXECUTEINFO()
+    info.cbSize, info.fMask = ctypes.sizeof(info), 0x40
+    info.lpVerb, info.lpFile = 'runas', str(installer)
+    info.lpParameters, info.nShow = subprocess.list2cmdline(flags), 1
+    shell, kernel = ctypes.WinDLL('shell32', use_last_error=True), ctypes.WinDLL('kernel32', use_last_error=True)
+    shell.ShellExecuteExW.argtypes = [ctypes.POINTER(SHELLEXECUTEINFO)]
+    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE,wintypes.DWORD]
+    kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE,ctypes.POINTER(wintypes.DWORD)]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    if not shell.ShellExecuteExW(ctypes.byref(info)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if kernel.WaitForSingleObject(info.hProcess, timeout*1000) != 0:
+            raise TimeoutError('Setup did not finish')
+        code = wintypes.DWORD()
+        if not kernel.GetExitCodeProcess(info.hProcess,ctypes.byref(code)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return code.value
+    finally:
+        kernel.CloseHandle(info.hProcess)
+
+
 def wait_for_exit(pid, timeout=90):
     if os.name != 'nt':
         return
@@ -49,11 +83,11 @@ def main():
         if not installer.is_file():
             raise FileNotFoundError(str(installer))
         flags = ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-',
-                 '/CLOSEAPPLICATIONS',
+                 '/CLOSEAPPLICATIONS', f'/DIR={app.parent}',
                  f'/LOG={installer.parent / "inno_frissites.log"}']
-        result = subprocess.run([str(installer)] + flags, timeout=900)
-        if result.returncode != 0:
-            raise RuntimeError(f'Telepítő kilépési kód: {result.returncode}')
+        code = run_elevated(installer, flags)
+        if code != 0:
+            raise RuntimeError(f'Telepítő kilépési kód: {code}')
         if not app.exists():
             raise RuntimeError('A telepített alkalmazás nem található.')
         if app.suffix.lower() == '.py':
@@ -65,6 +99,16 @@ def main():
     except Exception as exc:
         try:
             logfile.write_text(f'Frissítési hiba: {exc}\n', encoding='utf-8')
+        except OSError:
+            pass
+        # A cancelled UAC request or failed Setup must leave the existing app usable.
+        try:
+            if app.is_file():
+                command = [sys.executable, str(app)] if app.suffix.lower() == '.py' else [str(app)]
+                subprocess.Popen(command, cwd=str(app.parent), close_fds=True)
+            if os.name == 'nt':
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(None, str(exc), 'Torrent Manager', 0x10)
         except OSError:
             pass
         return 1

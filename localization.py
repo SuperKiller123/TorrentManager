@@ -156,3 +156,65 @@ for _code, _values in STATUS_TEXT.items():
     if len(_values) != len(STATUS_KEYS):
         raise ValueError(_code)
     TEXT[_code].update(dict(zip(STATUS_KEYS, _values)))
+
+# v0.7 setup and Windows options. Additional help falls back to English.
+V07_EN = {
+ 'transfer':'Transfer speed', 'setup_close_browser':'Close the login browser before continuing.',
+ 'setup_title':'First setup',
+ 'setup_intro':'Configure the connection and limits. Save is enabled only after a successful WebUI connection test.',
+ 'setup_finish':'Test connection and save', 'setup_login':'After setup, use the BitHuMen login button in Settings to sign in through the browser.',
+ 'startup':'Start with Windows', 'close_to_tray':'Close window to notification area', 'desktopicon':'Desktop shortcut', 'exit':'Exit',
+ 'help_qb_url':'Enter the qBittorrent WebUI address, including http:// or https://.',
+ 'help_qb_username':'Use the username configured in qBittorrent WebUI.',
+ 'help_qb_password':'Use your WebUI password, not your tracker password.',
+ 'help_qb_save_path':'Choose an existing folder for downloaded torrent content.',
+ 'help_check_minutes':'The tracker is checked at this interval in minutes (1–1440).',
+ 'help_max_managed_torrents':'Maximum number of torrents managed by this application (1–500).',
+ 'help_max_disk_usage_percent':'Set the maximum allowed disk usage percentage (1–99).',
+ 'help_min_size_gb':'Optional minimum torrent size in decimal GB; leave blank for no minimum.',
+ 'help_max_size_gb':'Optional maximum torrent size in decimal GB; leave blank for no maximum.',
+ 'help_startup':'Launch the installed application automatically when you sign in to Windows.',
+ 'help_close_to_tray':'The notification area menu lets you restore or exit the application.',
+ 'help_desktopicon':'Create or remove your personal desktop shortcut.',
+}
+V07_HU = {
+ 'transfer':'Átviteli sebesség', 'setup_close_browser':'A folytatás előtt zárd be a bejelentkezési böngészőt.',
+ 'setup_title':'Első beállítás',
+ 'setup_intro':'Állítsd be a kapcsolatot és a korlátokat. A mentéshez sikeres WebUI-kapcsolatteszt szükséges.',
+ 'setup_finish':'Kapcsolat tesztelése és mentés', 'setup_login':'A beállítás után a Beállítások BitHuMen-bejelentkezés gombjával jelentkezhetsz be a böngészőben.',
+ 'startup':'Indítás a Windowszal', 'close_to_tray':'Bezáráskor futás az értesítési területen', 'desktopicon':'Asztali parancsikon', 'exit':'Kilépés',
+ 'help_qb_url':'A qBittorrent WebUI címe http:// vagy https:// előtaggal.',
+ 'help_qb_username':'A qBittorrent WebUI-ban beállított felhasználónév.',
+ 'help_qb_password':'A WebUI-jelszót add meg, ne a trackerhez használt jelszavadat.',
+ 'help_qb_save_path':'Válassz létező mappát a torrentek letöltött tartalmának.',
+ 'help_check_minutes':'A toplista ellenőrzése ilyen időközönként történik, percben (1–1440).',
+ 'help_max_managed_torrents':'Az alkalmazás által kezelt torrentek legnagyobb száma (1–500).',
+ 'help_max_disk_usage_percent':'A megengedett legnagyobb tárhelyhasználat százalékban (1–99).',
+ 'help_min_size_gb':'Opcionális alsó mérethatár decimális GB-ban; üresen nincs alsó korlát.',
+ 'help_max_size_gb':'Opcionális felső mérethatár decimális GB-ban; üresen nincs felső korlát.',
+ 'help_startup':'A telepített alkalmazás automatikusan elindul a Windows-bejelentkezéskor.',
+ 'help_close_to_tray':'Az értesítési terület ikonjának menüjéből visszaállítható és bezárható az alkalmazás.',
+ 'help_desktopicon':'A személyes asztali parancsikon létrehozása vagy eltávolítása.',
+}
+for _code in LANGUAGES:
+    TEXT[_code].update(V07_HU if _code == 'hu' else V07_EN)
+TEXT['hu']['about_description'] = ('A Torrent Manager a BitHuMen seederek szerint rendezett toplistáját figyeli. '
+ 'A qBittorrenthez a WebUI-n keresztül kapcsolódik. Az első indításkor külön beállítófelület segít a konfigurálásban. '
+ 'Megadható a kezelt torrentek száma. A torrentméret alsó és felső határa decimális GB-ban állítható. '
+ 'A tárhelyhasználatnak külön korlát szabható. A próbaüzem módosítás nélkül mutatja a tervezett műveleteket. '
+ 'A csak hozzáadás mód nem töröl torrenteket. A teljes mód kizárólag a program által nyilvántartott torrenteket kezelheti és törölheti. '
+ 'Az események UTF-8 naplóba kerülnek. A felület sötét és világos témát támogat. '
+ 'A kiadáslista automatikusan betöltődik, a telepítők letöltését SHA-256 ellenőrzés követi.')
+TEXT['en']['about_description'] = ('Torrent Manager monitors the BitHuMen list ordered by seeders. '
+ 'It connects to qBittorrent through WebUI. First-run setup helps configure the connection. '
+ 'You can limit the number of managed torrents. Minimum and maximum sizes use decimal GB. '
+ 'A separate limit controls disk usage. Dry run previews actions without changing torrents. '
+ 'Add-only mode never deletes torrents. Full mode can delete only torrents recorded as owned by this application. '
+ 'Events are written to a UTF-8 log. Dark and light themes are available. '
+ 'Release lists load automatically and downloaded installers require SHA-256 verification.')
+
+from localization_v07 import extend as _extend_v07
+_extend_v07(TEXT)
+from localization_v07 import ABOUT as _ABOUT_V07
+for _code, _description in _ABOUT_V07.items():
+    TEXT[_code]['about_description'] = _description

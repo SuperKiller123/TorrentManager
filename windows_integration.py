@@ -18,15 +18,14 @@ def set_windows_startup(enabled):
     with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER,
             r'Software\Microsoft\Windows\CurrentVersion\Run', 0,
             winreg.KEY_READ | winreg.KEY_WRITE) as key:
-        if enabled:
-            if not getattr(sys, 'frozen', False):
-                raise OSError('Csak telepített alkalmazásnál engedélyezhető.')
-            winreg.SetValueEx(key, RUN_NAME, 0, winreg.REG_SZ, f'"{Path(sys.executable).resolve()}"')
-        else:
-            try:
-                winreg.DeleteValue(key, RUN_NAME)
-            except FileNotFoundError:
-                pass
+        try:
+            winreg.DeleteValue(key, RUN_NAME)
+        except FileNotFoundError:
+            pass
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+            r'Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders') as key:
+        startup = Path(os.path.expandvars(winreg.QueryValueEx(key, 'Startup')[0]))
+    _set_shortcut(startup / 'Torrent Manager.lnk', enabled, 'StartupShortcut')
 
 def remove_legacy_windows_startup():
     set_windows_startup(False)
@@ -99,8 +98,16 @@ def apply_windows_titlebar(root, dark, background):
         import ctypes
         from ctypes import wintypes
         root.update_idletasks()
+        ctypes.windll.user32.GetParent.argtypes = [wintypes.HWND]
+        ctypes.windll.user32.GetParent.restype = wintypes.HWND
         hwnd = ctypes.windll.user32.GetParent(root.winfo_id()) or root.winfo_id()
         dwm = ctypes.windll.dwmapi
+        # Suppress the native small Tk feather without removing taskbar branding.
+        class WTA_OPTIONS(ctypes.Structure):
+            _fields_ = [('dwFlags', wintypes.DWORD), ('dwMask', wintypes.DWORD)]
+        options = WTA_OPTIONS(2, 2)  # WTNCA_NODRAWICON
+        ctypes.windll.uxtheme.SetWindowThemeAttribute(wintypes.HWND(hwnd), 1,
+            ctypes.byref(options), ctypes.sizeof(options))
         flag = ctypes.c_int(1 if dark else 0)
         for attr in (20, 19):
             if dwm.DwmSetWindowAttribute(wintypes.HWND(hwnd), attr, ctypes.byref(flag), ctypes.sizeof(flag)) == 0:
@@ -113,3 +120,91 @@ def apply_windows_titlebar(root, dark, background):
         dwm.DwmSetWindowAttribute(wintypes.HWND(hwnd), 36, ctypes.byref(text), ctypes.sizeof(text))
     except (OSError, ValueError, AttributeError):
         pass  # older Windows versions may not support colored caption
+
+
+def set_desktop_shortcut(enabled):
+    if os.name != 'nt':
+        if enabled:
+            raise OSError('Windows required')
+        return
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+            r'Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders') as key:
+        desktop = Path(os.path.expandvars(winreg.QueryValueEx(key, 'Desktop')[0]))
+    _set_shortcut(desktop / 'Torrent Manager.lnk', enabled, 'DesktopShortcut')
+
+
+def _set_shortcut(shortcut, enabled, setting):
+    import configparser
+    from paths import DATA_DIR
+    record = DATA_DIR / 'windows.ini'
+    ini = configparser.ConfigParser(interpolation=None)
+    ini.optionxform = str
+    ini.read(record, encoding='utf-8')
+    if not ini.has_section('Windows'):
+        ini.add_section('Windows')
+    previous = ini.get('Windows', setting, fallback='')
+    if previous and previous != str(shortcut) and Path(previous).name == 'Torrent Manager.lnk':
+        Path(previous).unlink(missing_ok=True)
+    if not enabled:
+        shortcut.unlink(missing_ok=True)
+    else:
+        if not getattr(sys, 'frozen', False):
+            raise OSError('Shortcut requires an installed application')
+        shortcut.parent.mkdir(parents=True, exist_ok=True)
+        script = "$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:TM_SHORTCUT);$s.TargetPath=$env:TM_TARGET;$s.Save()"
+        env = dict(os.environ, TM_SHORTCUT=str(shortcut), TM_TARGET=sys.executable)
+        subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', script], check=True, env=env,
+                        creationflags=subprocess.CREATE_NO_WINDOW)
+    ini.set('Windows',setting,str(shortcut) if enabled else '')
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with record.open('w', encoding='utf-8') as stream:
+        ini.write(stream)
+
+
+class FullscreenController:
+    def __init__(self, root, repaint):
+        self.root, self.repaint = root, repaint
+        self.active = False
+        self.previous = None
+
+    def toggle(self):
+        root = self.root
+        if not self.active:
+            self.previous = root.state(), root.geometry()
+            root.update_idletasks()
+            if os.name == 'nt':
+                import ctypes
+                from ctypes import wintypes
+                class MONITORINFO(ctypes.Structure):
+                    _fields_ = [('cbSize', wintypes.DWORD), ('rcMonitor', wintypes.RECT),
+                                ('rcWork', wintypes.RECT), ('dwFlags', wintypes.DWORD)]
+                user = ctypes.WinDLL('user32', use_last_error=True)
+                user.GetParent.argtypes = [wintypes.HWND]
+                user.GetParent.restype = wintypes.HWND
+                user.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+                user.MonitorFromWindow.restype = wintypes.HANDLE
+                user.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MONITORINFO)]
+                hwnd = user.GetParent(root.winfo_id()) or root.winfo_id()
+                monitor = user.MonitorFromWindow(hwnd, 2)
+                info = MONITORINFO()
+                info.cbSize = ctypes.sizeof(info)
+                if not user.GetMonitorInfoW(monitor, ctypes.byref(info)):
+                    raise ctypes.WinError()
+                rect = info.rcMonitor
+                root.state('normal')
+                root.overrideredirect(True)
+                root.geometry(f'{rect.right-rect.left}x{rect.bottom-rect.top}{rect.left:+d}{rect.top:+d}')
+                root.lift()
+            else:
+                root.attributes('-fullscreen', True)
+            self.active = True
+        else:
+            if os.name == 'nt':
+                root.overrideredirect(False)
+                root.geometry(self.previous[1])
+                root.state(self.previous[0])
+            else:
+                root.attributes('-fullscreen', False)
+            self.active = False
+            root.after(80, self.repaint)

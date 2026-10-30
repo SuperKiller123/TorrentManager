@@ -10,6 +10,8 @@ DEFAULT = {
     "max_disk_usage_percent": 70, "max_managed_torrents": 50,
     "min_size_gb": "", "max_size_gb": "", "mode": "dry",
     "headless": True, "theme": "dark", "language": "hu",
+    "startup": False, "close_to_tray": False, "desktopicon": False,
+    "setup_complete": False,
 }
 MODES = ("dry", "add", "full")
 INT_KEYS = ("check_minutes", "max_disk_usage_percent", "max_managed_torrents")
@@ -45,6 +47,8 @@ def normalize_settings(saved):
         result["max_disk_usage_percent"] = int(disk)
     if result.get("theme") not in ("dark", "light", "system"):
         result["theme"] = "dark"
+    for key in ('startup', 'close_to_tray', 'desktopicon', 'setup_complete'):
+        result[key] = result[key] is True
     from localization import LANGUAGES
     if result.get("language") not in LANGUAGES:
         result["language"] = "hu"
@@ -52,6 +56,13 @@ def normalize_settings(saved):
 
 def validate_settings(raw):
     result = normalize_settings(raw)
+    if result.get('qb_save_path'):
+        from pathlib import Path
+        import sys
+        from paths import DATA_DIR, BASE
+        target = Path(result['qb_save_path']).expanduser().resolve()
+        if target.is_relative_to(DATA_DIR.resolve()) or (getattr(sys, 'frozen', False) and target.is_relative_to(BASE.resolve())):
+            raise ValueError('A letöltési mappa nem lehet a Torrent Manager saját program- vagy adatmappájában.')
     for key in INT_KEYS:
         value = str(result[key]).strip()
         if not value.isdecimal():

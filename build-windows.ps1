@@ -1,4 +1,4 @@
-# Torrent Manager v0.6 – egyetlen PowerShell-parancsból készül el a Windows-verzió.
+# Torrent Manager v0.7 – egyetlen PowerShell-parancsból készül el a Windows-verzió.
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -16,6 +16,11 @@ if (-not (Test-Path '.venv\Scripts\python.exe')) {
 $py = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
 & $py -m pip install -r requirements-build.txt
 if ($LASTEXITCODE -ne 0) { throw "A Python-függőségek telepítése sikertelen." }
+$env:TEMP = Join-Path $PSScriptRoot '.test-tmp'
+$env:TMP = $env:TEMP
+New-Item -ItemType Directory -Path $env:TEMP -Force | Out-Null
+& $py -m unittest discover -s tests -v
+if ($LASTEXITCODE -ne 0) { throw "A regressziós tesztek hibát találtak." }
 
 # Tartós könyvtárban lévő Chromium. Ismételt fordításkor nem szükséges újraletölteni.
 $browserCache = Join-Path $PSScriptRoot '.browser-cache'
@@ -52,14 +57,15 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'dist\TorrentLogin.exe') `
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'dist\TorrentUpdater.exe') `
     -Destination (Join-Path $bundle 'TorrentUpdater.exe') -Force
 $bundledBrowser = Join-Path $bundle 'browsers'
-if (Test-Path $bundledBrowser) { Remove-Item $bundledBrowser -Recurse -Force }
+if (([IO.Path]::GetFullPath($bundledBrowser)).StartsWith(([IO.Path]::GetFullPath($bundle)) + '\') -eq $false) { throw 'Invalid browser target' }
+if (Test-Path $bundledBrowser) { Remove-Item -LiteralPath $bundledBrowser -Recurse -Force }
 Copy-Item -LiteralPath $browserCache -Destination $bundledBrowser -Recurse -Force
 if (-not (Get-ChildItem $bundledBrowser -Directory -Filter 'chromium-*' -ErrorAction SilentlyContinue)) {
     throw "Hiányzik a Chromium a hordozható alkalmazásból."
 }
 
 # Külön ZIP a GitHub Releases oldalon közzétehető, hordozható verzióhoz.
-$portable = Join-Path $PSScriptRoot 'dist\TorrentManager-v0.6-Windows-portable.zip'
+$portable = Join-Path $PSScriptRoot 'dist\TorrentManager-v0.7-Windows-portable.zip'
 if (Test-Path $portable) { Remove-Item $portable -Force }
 Compress-Archive -Path (Join-Path $bundle '*') -DestinationPath $portable -CompressionLevel Optimal
 Write-Host "Hordozható program: $bundle\TorrentManager.exe"
@@ -68,6 +74,7 @@ Write-Host "Hordozható ZIP: $portable"
 # Inno Setup 6, ha telepítve van. GitHub Actions alatt automatikusan telepítjük.
 $iscc = $null
 foreach ($candidate in @(
+    (Join-Path $PSScriptRoot '.tools\Inno\ISCC.exe'),
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
     "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
 )) {
@@ -76,14 +83,14 @@ foreach ($candidate in @(
 if ($iscc) {
     & $iscc 'installer.iss'
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup build sikertelen." }
-    Write-Host "Telepítő: dist\installer\TorrentManager-Setup-v0.6.0.exe"
+    Write-Host "Telepítő: dist\installer\TorrentManager-Setup-v0.7.exe"
 } else {
     Write-Host "Inno Setup 6 nem található. Hordozható ZIP készült telepítő helyett."
 }
 
 # A frissítő automatikusan kizárólag a megfelelő SHA-256 értékű telepítőt fogadja el.
 $hashes = @()
-$setup = Join-Path $PSScriptRoot 'dist\installer\TorrentManager-Setup-v0.6.0.exe'
+$setup = Join-Path $PSScriptRoot 'dist\installer\TorrentManager-Setup-v0.7.exe'
 foreach ($file in @($portable, $setup)) {
     if (Test-Path $file) {
         $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()
