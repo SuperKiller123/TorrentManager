@@ -83,11 +83,17 @@ def main():
         if not installer.is_file():
             raise FileNotFoundError(str(installer))
         flags = ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-',
-                 '/CLOSEAPPLICATIONS', f'/DIR={app.parent}',
+                 '/CLOSEAPPLICATIONS', '/NORESTARTAPPLICATIONS', '/RESTARTEXITCODE=3010', f'/DIR={app.parent}',
                  f'/LOG={installer.parent / "inno_frissites.log"}']
         code = run_elevated(installer, flags)
-        if code != 0:
+        if code not in (0, 3010):
             raise RuntimeError(f'Telepítő kilépési kód: {code}')
+        if code == 3010:
+            logfile.write_text('Installation succeeded. Restart Windows before opening Torrent Manager.\n', encoding='utf-8')
+            if os.name == 'nt':
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(None, 'Installation succeeded. Please restart Windows.', 'Torrent Manager', 0x40)
+            return 0
         if not app.exists():
             raise RuntimeError('A telepített alkalmazás nem található.')
         if app.suffix.lower() == '.py':
@@ -103,7 +109,7 @@ def main():
             pass
         # A cancelled UAC request or failed Setup must leave the existing app usable.
         try:
-            if app.is_file():
+            if app.is_file() and not isinstance(exc, TimeoutError):
                 command = [sys.executable, str(app)] if app.suffix.lower() == '.py' else [str(app)]
                 subprocess.Popen(command, cwd=str(app.parent), close_fds=True)
             if os.name == 'nt':

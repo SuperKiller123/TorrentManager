@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 import requests
 
-VERSION = "0.7"
+VERSION = "0.8"
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 INSTALLER_PATTERN = re.compile(r"^TorrentManager-Setup-v[0-9]+(?:\.[0-9]+){1,3}\.exe$", re.I)
 CHECKSUM_NAME = "SHA256SUMS.txt"
@@ -68,11 +68,19 @@ def check_latest(repository, current=VERSION, session=None):
 
 
 
+def release_state(releases, current=VERSION):
+    """A downloadable historical/current version is not an available upgrade."""
+    if not releases:
+        return 'no_releases'
+    return 'update_available' if any(parse_version(r['version']) > parse_version(current)
+                                     for r in releases) else 'up_to_date'
+
+
 def list_releases(repository, session=None):
     """List verified-installable current and historical GitHub releases.
 
     Reject prereleases and malformed/mismatched installer versions; only use
-    GitHub release download URLs and the signed-in-release SHA256 manifest.
+    GitHub release download URLs and the release's SHA256 integrity manifest.
     """
     repository = normalize_repo(repository)
     http = session or requests

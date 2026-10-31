@@ -140,14 +140,14 @@ class TkTests(unittest.TestCase):
                 for child in widget.winfo_children():
                     yield child
                     yield from descendants(child)
-            entries = [w for w in descendants(root) if isinstance(w, wizard.ttk.Entry)]
+            entries = [w for w in descendants(root) if isinstance(w, tk.Entry)]
             values = [f'http://127.0.0.1:{server.server_port}', 'admin',
                       'árvíztűrő & secret', str(folder)]
             for entry,value in zip(entries,values):
                 entry.delete(0,'end')
                 entry.insert(0,value)
-            [w for w in descendants(root) if isinstance(w,wizard.ttk.Button)
-                and w['text'] == 'Test connection and save'][0].invoke()
+            [w for w in descendants(root) if isinstance(w,tk.Button)
+                and w['text'] == 'Save'][0].invoke()
         with tempfile.TemporaryDirectory() as td:
             folder = Path(td)
             with patch.object(wizard,'SETTINGS',folder/'settings.json'), \
@@ -193,6 +193,7 @@ class TkTests(unittest.TestCase):
         root.report_callback_exception = lambda *args: errors.append(args)
         cfg = normalize_settings({'setup_complete':True})
         with patch.object(gui,'read_settings',return_value=cfg), patch.object(threading.Thread,'start'), \
+             patch.object(gui.App,'open_bithumen_login'), \
              patch.object(gui.App,'check_updates'):
             app = gui.App(root)
             try:

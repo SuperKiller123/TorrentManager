@@ -39,8 +39,31 @@ def find_qbittorrent():
                             str(Path(base) / 'Programs' / 'qBittorrent' / 'qbittorrent.exe')))
     return next((str(Path(p)) for p in choices if p and Path(p).is_file()), None)
 
-def minimize_pid_windows(pid):
-    """Minimize only windows owned by an app instance we started, not user's existing windows."""
+def qb_tray_enabled(config_path=None):
+    """Read only the tray setting; never alter the user's qBittorrent profile."""
+    import configparser
+    if config_path is None:
+        base = os.environ.get('APPDATA')
+        if not base:
+            return False
+        config_path = Path(base) / 'qBittorrent' / 'qBittorrent.ini'
+    try:
+        config = configparser.ConfigParser(interpolation=None, strict=False)
+        with Path(config_path).open(encoding='utf-8-sig') as stream:
+            config.read_file(stream)
+        # qBittorrent's upstream default is true; a missing/unreadable profile is
+        # deliberately not assumed to have created its notification icon yet.
+        return config.getboolean('Preferences', r'General\SystrayEnabled', fallback=True)
+    except (OSError, ValueError, configparser.Error):
+        return False
+
+
+def minimize_pid_windows(pid, to_tray=False):
+    """Hide only our newly started qB main window; never close/terminate qB.
+
+Hiding gives the requested notification-area behavior even when CloseToTray is
+disabled. With no tray enabled, keep the accessible minimized taskbar window.
+"""
     if os.name != 'nt':
         return 0
     import ctypes
@@ -53,13 +76,22 @@ def minimize_pid_windows(pid):
     user32.IsWindowVisible.restype = wintypes.BOOL
     user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
     user32.ShowWindow.restype = wintypes.BOOL
+    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetWindowTextW.restype = ctypes.c_int
+    user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+    user32.GetWindow.restype = wintypes.HWND
     count = 0
     def visit(hwnd, _):
         nonlocal count
         owner = wintypes.DWORD(0)
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
-        if owner.value == pid and user32.IsWindowVisible(hwnd):
-            user32.ShowWindow(hwnd, 6)  # SW_MINIMIZE: taskbar or tray, per qBittorrent settings
+        title = ctypes.create_unicode_buffer(512)
+        user32.GetWindowTextW(hwnd, title, len(title))
+        if (owner.value == pid and user32.IsWindowVisible(hwnd)
+                and 'qbittorrent' in title.value.lower() and not user32.GetWindow(hwnd, 4)):
+            # SW_HIDE cannot quit the process (WM_CLOSE can). Leave owned modal
+            # dialogs, legal notices and unrelated windows available to the user.
+            user32.ShowWindow(hwnd, 0 if to_tray else 6)
             count += 1
         return True
     user32.EnumWindows(callback_type(visit), 0)
@@ -87,10 +119,10 @@ def launch_qbittorrent():
         if proc.poll() is not None:
             break
         time.sleep(0.45)
-        minimize_pid_windows(proc.pid)
+        minimize_pid_windows(proc.pid, to_tray=qb_tray_enabled())
     return True
 
-def apply_windows_titlebar(root, dark, background):
+def apply_windows_titlebar(root, dark, background, show_icon=False):
     """Match Windows 10/11 native titlebar/buttons to the application theme."""
     if os.name != 'nt':
         return
@@ -101,11 +133,47 @@ def apply_windows_titlebar(root, dark, background):
         ctypes.windll.user32.GetParent.argtypes = [wintypes.HWND]
         ctypes.windll.user32.GetParent.restype = wintypes.HWND
         hwnd = ctypes.windll.user32.GetParent(root.winfo_id()) or root.winfo_id()
+        user = ctypes.windll.user32
+        getter = user.GetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p) == 8 else user.GetWindowLongW
+        setter = user.SetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p) == 8 else user.SetWindowLongW
+        getter.argtypes = [wintypes.HWND, ctypes.c_int]
+        getter.restype = ctypes.c_ssize_t
+        setter.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
+        setter.restype = ctypes.c_ssize_t
+        style = getter(hwnd, -20)
+        # A dialog-style native caption keeps Windows resize/snap/system buttons
+        # while suppressing the small caption icon. Unlike theme hints this works
+        # on modern DWM captions, too. The executable keeps its taskbar branding.
+        setter(hwnd, -20, style & ~1 if show_icon else style | 1)
+        user.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        user.SendMessageW.restype = ctypes.c_ssize_t
+        if show_icon:
+            for size, icon in getattr(root, '_caption_icons', {}).items():
+                if icon:
+                    user.SendMessageW(hwnd, 0x80, size, icon)  # WM_SETICON
+            root._caption_icons = {}
+        else:
+            saved = getattr(root, '_caption_icons', {})
+            if not getattr(root, '_blank_caption_icon', None):
+                user.CreateIcon.argtypes = [wintypes.HINSTANCE, ctypes.c_int, ctypes.c_int,
+                                           ctypes.c_byte, ctypes.c_byte, ctypes.c_void_p, ctypes.c_void_p]
+                user.CreateIcon.restype = wintypes.HICON
+                and_mask = (ctypes.c_ubyte * 32)(*([255] * 32))
+                xor_mask = (ctypes.c_ubyte * 32)()
+                root._blank_caption_icon = user.CreateIcon(None, 16, 16, 1, 1, and_mask, xor_mask)
+            for size in (0,):
+                previous = user.SendMessageW(hwnd, 0x80, size, root._blank_caption_icon)
+                if previous and previous != root._blank_caption_icon:
+                    saved[size] = previous
+            root._caption_icons = saved
+        user.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int,
+                                      ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+        user.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x37)  # FRAMECHANGED|NOACTIVATE|NOMOVE|NOSIZE|NOZORDER
         dwm = ctypes.windll.dwmapi
         # Suppress the native small Tk feather without removing taskbar branding.
         class WTA_OPTIONS(ctypes.Structure):
             _fields_ = [('dwFlags', wintypes.DWORD), ('dwMask', wintypes.DWORD)]
-        options = WTA_OPTIONS(2, 2)  # WTNCA_NODRAWICON
+        options = WTA_OPTIONS(0 if show_icon else 2, 2)  # WTNCA_NODRAWICON
         ctypes.windll.uxtheme.SetWindowThemeAttribute(wintypes.HWND(hwnd), 1,
             ctypes.byref(options), ctypes.sizeof(options))
         flag = ctypes.c_int(1 if dark else 0)
@@ -194,7 +262,21 @@ class FullscreenController:
                 rect = info.rcMonitor
                 root.state('normal')
                 root.overrideredirect(True)
-                root.geometry(f'{rect.right-rect.left}x{rect.bottom-rect.top}{rect.left:+d}{rect.top:+d}')
+                root.geometry(f'{rect.right-rect.left}x{rect.bottom-rect.top}+0+0')
+                root.update_idletasks()
+                # Tk interprets -x/-y as distance from the screen's far edge,
+                # whereas secondary monitors may have negative absolute origins.
+                # SetWindowPos accepts the monitor's signed desktop coordinates.
+                hwnd = user.GetParent(root.winfo_id()) or root.winfo_id()
+                user.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int,
+                    ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+                user.SetWindowPos.restype = wintypes.BOOL
+                if not user.SetWindowPos(hwnd, None, rect.left, rect.top,
+                        rect.right-rect.left, rect.bottom-rect.top, 0x24):
+                    root.overrideredirect(False)
+                    root.geometry(self.previous[1])
+                    root.state(self.previous[0])
+                    raise ctypes.WinError()
                 root.lift()
             else:
                 root.attributes('-fullscreen', True)

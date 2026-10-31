@@ -218,3 +218,6 @@ _extend_v07(TEXT)
 from localization_v07 import ABOUT as _ABOUT_V07
 for _code, _description in _ABOUT_V07.items():
     TEXT[_code]['about_description'] = _description
+
+from localization_v08 import extend as _extend_v08
+_extend_v08(TEXT)

@@ -1,4 +1,4 @@
-# Torrent Manager v0.7 – egyetlen PowerShell-parancsból készül el a Windows-verzió.
+# Torrent Manager v0.8 – egyetlen PowerShell-parancsból készül el a Windows-verzió.
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -14,7 +14,7 @@ if (-not (Test-Path '.venv\Scripts\python.exe')) {
     if ($LASTEXITCODE -ne 0) { throw "Python virtuális környezet létrehozása sikertelen. Python 3.13 szükséges." }
 }
 $py = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
-& $py -m pip install -r requirements-build.txt
+& $py -m pip install -r requirements-tested.txt
 if ($LASTEXITCODE -ne 0) { throw "A Python-függőségek telepítése sikertelen." }
 $env:TEMP = Join-Path $PSScriptRoot '.test-tmp'
 $env:TMP = $env:TEMP
@@ -38,7 +38,7 @@ if ($LASTEXITCODE -ne 0) { throw "A GUI build sikertelen." }
     --paths $PSScriptRoot --collect-all playwright TorrentMotor.py
 if ($LASTEXITCODE -ne 0) { throw "A motor build sikertelen." }
 
-# Bejelentkezési ablak csak a felhasználó kifejezett kérésére.
+# Automatikus munkamenet-ellenőrzés; látható belépés csak hiányzó/lejárt munkamenetnél.
 & $py -m PyInstaller --noconfirm --onefile --windowed --name TorrentLogin `
     --paths $PSScriptRoot --collect-all playwright auth_browser.py
 if ($LASTEXITCODE -ne 0) { throw "A BitHuMen bejelentkezési segédprogram buildje sikertelen." }
@@ -65,7 +65,7 @@ if (-not (Get-ChildItem $bundledBrowser -Directory -Filter 'chromium-*' -ErrorAc
 }
 
 # Külön ZIP a GitHub Releases oldalon közzétehető, hordozható verzióhoz.
-$portable = Join-Path $PSScriptRoot 'dist\TorrentManager-v0.7-Windows-portable.zip'
+$portable = Join-Path $PSScriptRoot 'dist\TorrentManager-v0.8-Windows-portable.zip'
 if (Test-Path $portable) { Remove-Item $portable -Force }
 Compress-Archive -Path (Join-Path $bundle '*') -DestinationPath $portable -CompressionLevel Optimal
 Write-Host "Hordozható program: $bundle\TorrentManager.exe"
@@ -83,14 +83,14 @@ foreach ($candidate in @(
 if ($iscc) {
     & $iscc 'installer.iss'
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup build sikertelen." }
-    Write-Host "Telepítő: dist\installer\TorrentManager-Setup-v0.7.exe"
+    Write-Host "Telepítő: dist\installer\TorrentManager-Setup-v0.8.exe"
 } else {
     Write-Host "Inno Setup 6 nem található. Hordozható ZIP készült telepítő helyett."
 }
 
 # A frissítő automatikusan kizárólag a megfelelő SHA-256 értékű telepítőt fogadja el.
 $hashes = @()
-$setup = Join-Path $PSScriptRoot 'dist\installer\TorrentManager-Setup-v0.7.exe'
+$setup = Join-Path $PSScriptRoot 'dist\installer\TorrentManager-Setup-v0.8.exe'
 foreach ($file in @($portable, $setup)) {
     if (Test-Path $file) {
         $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()

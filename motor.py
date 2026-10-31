@@ -6,6 +6,7 @@ from urllib.parse import urljoin, urlparse, parse_qs, urlencode, urlunparse
 import requests
 from webui import webui_session
 from playwright.sync_api import sync_playwright
+from browser_profile import ProfileLock
 
 from paths import SETTINGS as CFG, STATE, PROFILE, LOG, DATA_DIR, migrate_old_data, find_playwright_browsers
 from policy import TOP_URL, DEFAULT, validate_settings, allowed_size
@@ -185,6 +186,10 @@ def collect_top_pages(page,c):
  items=sorted(found.values(),key=lambda x:(-x["seeders"],x["id"]))[:limit]
  return items
 
+class TrackerLoginRequired(RuntimeError):
+ pass
+
+
 def wait_for_bithumen_login(page,c):
  """Wait for actual access to the torrent table, without interrupting the login form."""
  log("BitHuMen hozzáférés ellenőrzése (rejtett Chromium).")
@@ -193,12 +198,12 @@ def wait_for_bithumen_login(page,c):
   current=urlparse(page.url)
   # Never navigate away while the user is filling in the login form.
   if current.path.endswith("/login.php"):
-   raise RuntimeError("BitHuMen bejelentkezés szükséges: állítsd le az automatizálást, és a Beállításokban nyisd meg a kézi bejelentkezést.")
+   raise TrackerLoginRequired("BitHuMen bejelentkezés szükséges.")
   try:
    page.goto(TOP_URL,wait_until="domcontentloaded",timeout=45000)
    current=urlparse(page.url)
    if current.path.endswith("/login.php"):
-    raise RuntimeError("BitHuMen bejelentkezés szükséges: Beállítások > Bejelentkezés megnyitása.")
+    raise TrackerLoginRequired("BitHuMen bejelentkezés szükséges.")
    if current.path.endswith("/browse.php") and parse_list(page,c):
     log("BitHuMen bejelentkezés ellenőrizve; toplista elérhető.")
     return
@@ -380,7 +385,7 @@ def main():
    log(f"Várakozás a qBittorrentre ({retry+1}/12): {exc}")
    time.sleep(3)
  state=read_json(STATE,{})
- with sync_playwright() as p:
+ with ProfileLock(PROFILE), sync_playwright() as p:
   context=p.chromium.launch_persistent_context(str(PROFILE),headless=True)
   page=context.pages[0] if context.pages else context.new_page()
   page.goto("https://bithumen.be/",wait_until="domcontentloaded")
@@ -391,6 +396,13 @@ def main():
      s=qb_login(c)
      wait_for_bithumen_login(page,c)
      cycle(page,s,c,state)
+    except TrackerLoginRequired as e:
+     for rec in state.values():
+      if isinstance(rec,dict):rec["missing_scans"]=0
+     write_json(STATE,state)
+     log(str(e))
+     # Let the GUI reopen login after Chromium has released its profile lock.
+     raise SystemExit(2)
     except Exception as e:
      for rec in state.values():
       if isinstance(rec,dict):rec["missing_scans"]=0
@@ -399,6 +411,8 @@ def main():
     log(f"Következő ellenőrzés {c['check_minutes']} perc múlva.")
     time.sleep(max(1,int(c["check_minutes"]))*60)
   except KeyboardInterrupt:log("Leállítva.")
-  finally:context.close()
+  finally:
+   context.close()
+   if s is not None:s.close()
 if __name__=="__main__":
  main()

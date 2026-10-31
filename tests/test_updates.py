@@ -60,7 +60,7 @@ class UpdateTests(unittest.TestCase):
                 {"name": "TorrentManager-Setup-v0.8.exe", "browser_download_url": "https://github.com/user/repo/a"},
                 {"name": "SHA256SUMS.txt", "browser_download_url": "https://github.com/user/repo/b"},
             ]})
-        rel = updater.check_latest("user/repo", session=FakeSession([response]))
+        rel = updater.check_latest("user/repo", current='0.7', session=FakeSession([response]))
         self.assertTrue(rel["newer"])
         self.assertIsNotNone(rel["installer"])
         self.assertIsNotNone(rel["checksums"])

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Torrent Manager v0.6 – modern, DPI-aware Windows UI for the safe torrent engine."""
+"""Torrent Manager v0.8 – Windows UI for the safe torrent engine."""
 import json
 import os
 import queue
@@ -16,7 +16,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from paths import BASE, SETTINGS, DATA_DIR, LOG, migrate_old_data, find_playwright_browsers
 from policy import GITHUB_REPO, normalize_settings, validate_settings
-from updater import VERSION, list_releases, download_installer, UpdateError, parse_version
+from updater import VERSION, list_releases, download_installer, UpdateError, parse_version, release_state
 from localization import tr, LANGUAGES
 from webui import check_webui, webui_session, read_telemetry
 from windows_integration import (launch_qbittorrent, apply_windows_titlebar,
@@ -80,6 +80,8 @@ class App:
         self.cfg = read_settings()
         self.events = queue.Queue()
         self.proc = None
+        self.login_proc = None
+        self.pending_start = False
         self.running = False
         self.closed = False
         self.tray = None
@@ -135,6 +137,7 @@ class App:
         root.after(120, self.poll)
         root.after(15000, self._periodic_stats)
         root.after(500, self.check_updates)
+        root.after(700, lambda: self.open_bithumen_login(automatic=True))
 
     def T(self, key):
         return tr(self.cfg.get('language', 'hu'), key)
@@ -166,6 +169,7 @@ class App:
         self._releases_to_combobox()
         if self.releases:
             self.latest_value.set(self.releases[0]['version'])
+            self.update_message.set(self.T(release_state(self.releases)))
 
     def _styles(self):
         style = ttk.Style(self.root)
@@ -328,7 +332,8 @@ class App:
         interior.pack(fill='both', expand=True)
         self.dashboard_canvas = None
         metrics = tk.Frame(interior, bg=P['bg'])
-        metrics.pack(fill='x', pady=(0, 9))
+        metrics.pack(fill='both', expand=True, pady=(0, 9))
+        metrics.rowconfigure(0, weight=1)
         for i in range(4):
             metrics.columnconfigure(i, weight=1, uniform='metric')
         self.metric_auto = tk.StringVar()
@@ -342,7 +347,8 @@ class App:
                         label.configure(font=(FONT, 12, 'bold'))
             metric.grid(row=0, column=i, sticky='nsew', padx=(0, 5) if i < 3 else 0)
         extra = tk.Frame(interior, bg=P['bg'])
-        extra.pack(fill='x', pady=(0, 9))
+        extra.pack(fill='both', expand=True, pady=(0, 9))
+        extra.rowconfigure(0, weight=1)
         for i in range(4):
             extra.columnconfigure(i, weight=1, uniform='extra')
         self.mini_total = tk.StringVar(value='–')
@@ -358,7 +364,7 @@ class App:
             tk.Label(card, textvariable=variable, bg=P['panel'], fg=P['text'],
                      font=(FONT, 13, 'bold')).pack(anchor='w', pady=(5, 0))
         disk = self._card(interior)
-        disk.pack(fill='x', pady=(0, 9))
+        disk.pack(fill='both', expand=True, pady=(0, 9))
         dline = tk.Frame(disk, bg=P['panel'])
         dline.pack(fill='x')
         self._label(dline, self.T('disk_info'), 11, bold=True).pack(side='left')
@@ -368,7 +374,7 @@ class App:
         self.disk_track.pack(fill='x', pady=(12, 5))
         self.disk_track.bind('<Configure>', lambda _: self._paint_disk_bar())
         more = tk.Frame(interior, bg=P['bg'])
-        more.pack(fill='both', expand=True, pady=(0, 9))
+        more.pack(fill='x', pady=(0, 9))
         more.rowconfigure(0, weight=1)
         for i in range(2):
             more.columnconfigure(i, weight=1, uniform='more')
@@ -388,7 +394,7 @@ class App:
         self.bit_indicator = self._label(system, '○  BitHuMen', 10, 'muted')
         self.bit_indicator.pack(anchor='w', pady=2)
         logcard = self._card(interior)
-        logcard.pack(fill='both', expand=True, pady=(0, 9))
+        logcard.pack(fill='x', pady=(0, 9))
         self._label(logcard, self.T('recent'), 12, bold=True).pack(anchor='w', pady=(0, 8))
         self.preview = tk.Text(logcard, height=3, bg=P['input'], fg=P['text'], relief='flat',
                                bd=0, padx=12, pady=11, wrap='word',
@@ -562,7 +568,9 @@ class App:
         about.pack(fill='both', expand=True)
         self._label(about, self.T('about'), 12, bold=True).pack(anchor='w', pady=(0, 8))
         description = self.T('about_description')
-        self._label(about, description, 10, 'text', wraplength=920, justify='left').pack(anchor='w', fill='x', pady=(0, 15))
+        about_text = self._label(about, description, 10, 'text', wraplength=720, justify='left')
+        about_text.pack(anchor='w', fill='x', pady=(0, 15))
+        about_text.bind('<Configure>', lambda e: about_text.configure(wraplength=max(200, e.width-8)))
         self._button(about, self.T('github'), lambda: webbrowser.open('https://github.com/' + GITHUB_REPO),
                      'secondary').pack(anchor='w')
 
@@ -617,8 +625,9 @@ class App:
         widget.see('end')
         widget.configure(state='disabled')
 
-    def open_bithumen_login(self):
-        # Opening a visible browser requires an explicit click; never show it at app start.
+    def open_bithumen_login(self, automatic=False):
+        if self.login_proc and self.login_proc.poll() is None:
+            return
         if self.proc and self.proc.poll() is None:
             messagebox.showinfo('BitHuMen',
                 'Előbb állítsd le az automatizálást, hogy a böngészőprofil felszabaduljon.',
@@ -638,9 +647,12 @@ class App:
         if browser:
             env['PLAYWRIGHT_BROWSERS_PATH'] = str(browser)
         try:
-            subprocess.Popen(cmd, cwd=str(DATA_DIR), stdin=subprocess.DEVNULL,
+            self.login_proc = subprocess.Popen(cmd + ['--ensure' if automatic else '--login'], cwd=str(DATA_DIR), stdin=subprocess.DEVNULL,
                              creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), env=env)
-            self.append('Kézi BitHuMen-bejelentkezés megnyitva.')
+            self.bithumen_ready = False
+            self._bit_status()
+            self._status(self.running)
+            self.append(self.T('tracker_checking'))
         except OSError as exc:
             messagebox.showerror('BitHuMen', str(exc), parent=self.root)
 
@@ -729,11 +741,16 @@ class App:
 
     def _webui_loop(self):
         last_signature = None
+        credentials_rejected = False
         while not self.closed:
             cfg = self.cfg.copy()
             signature = (cfg.get('qb_url'), cfg.get('qb_username'), cfg.get('qb_password'))
             if signature != last_signature:
                 last_signature = signature
+                credentials_rejected = False
+            if credentials_rejected:
+                time.sleep(.1)
+                continue  # Avoid qBittorrent's IP ban; a settings edit permits a fresh attempt.
             try:
                 with webui_session(signature[0]) as http:
                     ready, message = check_webui(*signature, session=http)
@@ -743,6 +760,7 @@ class App:
                         except Exception:
                             pass
                 self.events.put(('webui', (signature, ready, message)))
+                credentials_rejected = message in ('bad_credentials', 'missing_credentials', 'invalid_url')
             except Exception as exc:
                 self.events.put(('webui', (signature, False, 'not_ready')))
             for _ in range(30):
@@ -755,6 +773,10 @@ class App:
             return
         if not self.connected:
             self.append('A WebUI még nem elérhető. Várakozás a kapcsolatra.')
+            return
+        if not self.bithumen_ready:
+            self.pending_start = True
+            self.open_bithumen_login(automatic=True)
             return
         if self._form_signature() != self._saved_signature or not SETTINGS.exists():
             if not self.save():
@@ -931,7 +953,12 @@ class App:
         enabled = (not self.downloading and release is not None and release['installer'] is not None
                    and release['checksums'] is not None
                    )
-        self.install_button.configure(state='normal' if enabled else 'disabled',
+        label = 'install'
+        if release:
+            comparison = parse_version(release['version'])
+            label = ('reinstall' if comparison == parse_version(VERSION) else
+                     'install_older' if comparison < parse_version(VERSION) else 'install')
+        self.install_button.configure(text=self.T(label), state='normal' if enabled else 'disabled',
                                       bg=P['blue'] if enabled else P['line'])
 
     def check_updates(self):
@@ -978,6 +1005,7 @@ class App:
 
     def _run_installer(self, installer):
         try:
+            self._close_login()
             if getattr(sys, 'frozen', False):
                 helper = BASE / 'TorrentUpdater.exe'
                 if not helper.is_file():
@@ -1007,6 +1035,17 @@ class App:
     def poll(self):
         if self.closed:
             return
+        if self.login_proc is not None and self.login_proc.poll() is not None:
+            code = self.login_proc.returncode
+            self.login_proc = None
+            self.bithumen_ready = code == 0
+            self._bit_status()
+            self.append(self.T('tracker_connected' if code == 0 else
+                               'tracker_cancelled' if code == 2 else 'tracker_unavailable'))
+            if self.pending_start:
+                self.pending_start = False
+                if self.bithumen_ready:
+                    self.start()
         try:
             while True:
                 kind, data = self.events.get_nowait()
@@ -1051,7 +1090,7 @@ class App:
                     self.releases = data
                     self._releases_to_combobox()
                     self.latest_value.set(data[0]['version'] if data else '–')
-                    self.update_message.set(self.T('update_ready'))
+                    self.update_message.set(self.T(release_state(data)))
                     self.check_button.configure(state='normal')
                 elif kind == 'releases_error':
                     self.update_message.set('GitHub hiba: ' + data)
@@ -1098,10 +1137,22 @@ class App:
             if not messagebox.askyesno('Kilépés', 'Leállítsuk az automatizálást is?', parent=self.root):
                 return
             self.stop()
+        self._close_login()
         self.closed = True
         if self.tray:
             self.tray.stop()
         self.root.destroy()
+
+    def _close_login(self):
+        proc = self.login_proc
+        if proc is not None and proc.poll() is None:
+            if os.name == 'nt':
+                subprocess.run(['taskkill', '/PID', str(proc.pid), '/T', '/F'],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               timeout=15, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            else:
+                proc.terminate()
+        self.login_proc = None
 
 
 if __name__ == '__main__':
@@ -1111,7 +1162,12 @@ if __name__ == '__main__':
     cfg = read_settings()
     if not cfg.get('setup_complete'):
         from setup_wizard import run_setup
-        threading.Thread(target=lambda: launch_qbittorrent(), daemon=True).start()
+        def start_setup_qb():
+            try:
+                launch_qbittorrent()
+            except (OSError, RuntimeError):
+                pass  # The wizard presents connection status and manual connection help.
+        threading.Thread(target=start_setup_qb, daemon=True).start()
         cfg = run_setup(root, cfg)
     if cfg:
         App(root)

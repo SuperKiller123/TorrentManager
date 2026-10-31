@@ -9,7 +9,8 @@ def webui_session(url):
     if urlparse(url).hostname in ('localhost', '127.0.0.1', '::1'):
         http.trust_env = False
     base = url.strip().rstrip('/')
-    http.headers.update({'Referer': base + '/', 'Origin': base})
+    parsed = urlparse(base)
+    http.headers.update({'Referer': base + '/', 'Origin': f'{parsed.scheme}://{parsed.netloc}'})
     return http
 
 

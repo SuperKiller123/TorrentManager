@@ -43,7 +43,7 @@ class V05SettingsTests(unittest.TestCase):
         self.assertEqual(a['mode'],'add')
 
     def test_version(self):
-        self.assertEqual(updater.VERSION,'0.7')
+        self.assertEqual(updater.VERSION,'0.8')
 
     def test_new_gui_does_not_expose_removed_controls(self):
         src=(Path(__file__).resolve().parents[1]/'TorrentManager.py').read_text(encoding='utf8')

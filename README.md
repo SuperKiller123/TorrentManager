@@ -1,65 +1,44 @@
-# Torrent Manager v0.7
+# Torrent Manager v0.8
 
-Windowsos qBittorrent- és BitHuMen-kezelő. A forrás alapja a SuperKiller123/TorrentManager repó v0.6 címkéje, `d259423f96e6dc42d8cee4a0a5691b120cf27914` commit.
+Windowsos qBittorrent- és BitHuMen-kezelő. Részletes változások, bizonyított eredmények és nyitott korlátok: [TESZTELES-v0.8.md](TESZTELES-v0.8.md).
 
-A csomag tesztelési állapotát és a még szükséges kézi próbákat a **TESZTELES-v0.7.md** részletezi. A sikeres fordítás nem helyettesíti a telepítés és eltávolítás ellenőrzését egy külön Windows-tesztgépen.
+## Használat
 
-## Telepítés és első indítás
+A TorrentManager-Setup-v0.8.exe alapértelmezetten a Program Files/Torrent Manager mappába telepít, rendszergazdai jogosultsággal. Egyetlen nyelvválasztás határozza meg a program nyelvét; a telepítő egységesen angol. Az első indítás témázott, egyoldalas beállításánál add meg a WebUI-adatokat, letöltési mappát és korlátokat. A Mentés sikeres kapcsolatellenőrzést igényel.
 
-1. Indítsd a `TorrentManager-Setup-v0.7.exe` fájlt. A telepítő rendszergazdai jogosultságot kér, az alapkönyvtár a Program Files/Torrent Manager.
-2. Egyetlen nyelvválasztás van, mind a 12 nyelvvel. Ez határozza meg a program induló nyelvét. A telepítő szövege minden választásnál egységesen angol: ez a korábban jóváhagyott tartalékmegoldás.
-3. Az asztali parancsikon, a Windowszal indulás és a háttérben futás beállítható. A telepítés végén választható az alkalmazás indítása.
-4. Az első indítási varázslóban add meg a qBittorrent WebUI címét, felhasználónevét, jelszavát, a letöltési mappát és a korlátokat. A kapcsolatnak sikeresen létre kell jönnie a mentéshez. A jelszó a WebUI-é, nem a trackeré.
-5. A BitHuMen-bejelentkezés gomb külön böngészőt nyit, amelyben kézzel jelentkezhetsz be. Zárd be a böngészőt a folytatás előtt. A trackerbejelentkezést a varázsló nem igazolja automatikusan; a motor ezt az első ellenőrzéskor vizsgálja.
-6. Először próbaüzemet használj. A teljes mód saját nyilvántartott torrenteket és fájljaikat is törölheti; ezt a program külön megerősítteti.
+Induláskor a program ellenőrzi a BitHuMen-munkamenetet; ha belépés szükséges, megnyitja a böngészőt. A jelszót a felhasználó írja be. Az automatizálás az Indítás gombbal indul. Az alapmód próbaüzem; módváltás a Beállításokban. A teljes mód saját nyilvántartott torrenteket és fájljaikat törölheti.
 
-## Működés
+A Windowszal indulás, asztali parancsikon, háttérben futás, téma és nyelv a Beállításokban módosítható. A tálca-/Start-kitűzéshez a telepítő útmutatót kínál, a kitűzés felhasználói művelet. F11 kapcsolja a teljes képernyőt, Esc nem lép ki belőle.
 
-- A WebUI-próba háttérszálon ismétlődik. Az automatizálás sikeres kapcsolat előtt nem indítható.
-- A helyi WebUI-kérések nem használják a környezeti proxyt. A próba és a motor ugyanazokat a munkamenet- és HTTP-fejléc-beállításokat használja.
-- A Kezdőlap nem görgethető. Az élő torrentdarabszám, a beállított korlátok, az átviteli grafikon, a tárhelymutató és a mini napló külön szerepel.
-- A támogatott legkisebb ablak 1000×700 logikai képpont. A Windows DPI-méretezése befolyásolja a rendelkezésre álló logikai területet.
-- F11 az aktuális monitor teljes képernyőjére vált, majd visszaállítja a korábbi ablakállapotot. Az Esc nem kapcsolja ki.
-- A Beállításokban a nyelv csak kiválasztással változik; a görgő nem lépteti. A beállítások oldalra visszatérés a lap tetejére visz.
-- A háttérben futás esetén a tálcaikon menüjéből nyitható meg vagy állítható le a program.
-- A GitHub-kiadáslista induláskor automatikusan betöltődik. A kiválasztott kiadás újra is telepíthető, és korábbi kiadás is választható, amennyiben telepítője és ellenőrzőösszege elérhető.
-- A frissítő menti a beállításokat, ellenőrzi a SHA-256 értéket, megvárja a program leállását, és UAC-val csak a telepítőt emeli. A telepítési könyvtárat kifejezetten átadja. UAC-megszakítás vagy telepítési hiba után újranyitja a meglévő alkalmazást és hibát jelez.
-- A fő felület és a varázsló 12 nyelvet tartalmaz. Egyes technikai hibaüzenetek és a motor naplója magyar maradt; a teljes diagnosztikai lokalizáció nem készült el.
+A kiadáslista automatikusan betöltődik; a telepítés külön kérésre indul. Azonos verzió újratelepítésként jelenik meg. A frissítő SHA-256 ellenőrzést végez és menti a beállításokat.
 
 ## Adatok és eltávolítás
 
-A felhasználói adatok a `%LOCALAPPDATA%/TorrentManager` mappában vannak. A programkönyvtárba nem mentődnek jelszavak vagy futási állapotok. A WebUI-jelszó a jelenlegi örökölt JSON-beállításban olvasható szövegként tárolódik; ezt a forráscsomag nem tartalmazza.
+A saját adatok a %LOCALAPPDATA%/TorrentManager mappába kerülnek. Az örökölt WebUI-jelszó JSON-ban tárolódik, a forráscsomag nem tartalmaz felhasználói adatot. A torrentletöltéseknek külön, az alkalmazás saját könyvtárain kívüli mappát válassz.
 
-Az eltávolító a csomag saját fájljait, böngészőjét, ismert régi saját fájljait, a ProfileListben felsorolt felhasználók TorrentManager-adatmappáit és a nyilvántartott saját parancsikonokat célozza. A qBittorrent-profilok és a torrenttartalmak nem szerepelnek a törlési listán. Új automatikus indítási bejegyzés saját Startup-parancsikonként készül. A betöltött felhasználói registry-hive-ok régi TorrentManager-bejegyzéseit is takarítja.
+Az eltávolító saját folyamatokra és saját program-/adatkönyvtárakra korlátozott takarítást végez. A torrentletöltési helyet, .torrent fájlokat és junction célokat megőrzi. Hozzáférési hiba vagy védett tartalom esetén jelentést ad. A régi per-user telepítések migrációja és a valódi offline Windows-profilok emelt jogosultságú takarítása még külön ellenőrzést igényel.
 
-**Nem bizonyított a maradéktalan eltávolítás minden Windows-fióknál:** a kijelentkezett felhasználók régi registry-hive-jait nem tölti be, és az egyedi helyre átirányított LocalAppData vagy zárolt fájlok külön próbát igényelnek. Az ismeretlen, más által a telepítési mappába másolt fájlokat szándékosan nem törli, ezért ilyen esetben a könyvtár megmaradhat.
+## Fejlesztés és fordítás
 
-## Fejlesztői futtatás és teszt
-
-Python 3.13, Windows x64:
+Python 3.13 és Inno Setup 6 szükséges. A build a requirements-tested.txt pontos verzióit használja:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
-.\.venv\Scripts\python.exe -m playwright install chromium
-.\.venv\Scripts\python.exe TorrentManager.py
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-```
-
-A Windows-felületi tesztekhez előbb állítsd be a `TM_GUI_TESTS=1` környezeti változót. A helyi HTTP-tesztekhez engedélyezett loopback kapcsolat kell. A tesztek alapból nem lépnek be a trackerre és nem dolgoznak a felhasználó torrentjeivel.
-
-`tests/live_qb_smoke.py`: külön indítható próba a `C:/Program Files/qBittorrent/qbittorrent.exe` fájllal, új munkamappabeli profillal és üres torrentlistával. Az eredeti profil ellenőrzőösszegeit összehasonlítja, a saját példányt leállítja.
-
-`tests/frozen_smoke.py`: a kész EXE elkülönített adatkönyvtárú, legfeljebb kétperces indítási próbája. A felhasználó által a tesztablakba beírt adatok a tesztkönyvtárban maradnak; ezeket ne csomagold kiadásba.
-
-## Windows-build
-
-Inno Setup 6 szükséges; a build a szokásos telepítési helyeken és a `.tools/Inno/ISCC.exe` útvonalon keresi. Futtasd:
-
-```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-tested.txt
 .\build-windows.ps1
 ```
 
-A build lefuttatja a regressziós teszteket, elkészíti a GUI-, motor-, bejelentkezési és frissítő EXE-ket, csomagolja a Chromiumot, majd a hordozható ZIP-et, telepítőt és SHA256SUMS.txt fájlt. A mellékelt `requirements-tested.txt` a teszteléskor használt pontos függőségeket rögzíti. A szokásos követelményfájl verziótartományokat használ.
+A dist mappában készül a hordozható ZIP, az installer almappában a telepítő; mellettük SHA256SUMS.txt. A hordozható csomag is felhasználói AppData-mappát használ.
 
-A GitHub-munkafolyamat frissítve lett a v0.7 fájlnevekre. Ebben a munkamenetben nem történt GitHub-push vagy kiadásközzététel.
+Teljes tesztfutás:
+
+```powershell
+$env:TM_GUI_TESTS='1'
+$env:TM_BROWSER_TESTS='1'
+$env:PLAYWRIGHT_BROWSERS_PATH=Join-Path $PWD '.browser-cache'
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Külön próbák: tests/live_qb_smoke.py (üres külön qB-profil), tests/installer_lifecycle_v08.py (külön Inno AppId és próbaadatok), tests/frozen_smoke.py (EXE első indítás). A tesztkönyvtárakat ne tedd kiadásba. A forráscsomag engedélyezett fájltípusokból a package-source.ps1 segítségével készül.
+
+A v0.8 helyi csomag; a GitHubra közzétételt ez a munkamenet nem végzi el. A teljes hibamentesség és minden Windows-környezet kompatibilitása nem igazolt.
