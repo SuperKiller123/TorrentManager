@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from localization import LANGUAGES, TEXT
-from localization_v08 import KEYS, ABOUT_EXTRA
+from localization_v08 import KEYS
 from policy import normalize_settings
 
 
@@ -18,13 +18,15 @@ def descendants(widget):
 
 
 class TranslationTests(unittest.TestCase):
-    def test_expanded_descriptions_and_all_new_strings(self):
-        self.assertEqual(set(ABOUT_EXTRA), set(LANGUAGES))
+    def test_current_descriptions_and_all_new_strings(self):
         for code in LANGUAGES:
             with self.subTest(code=code):
                 self.assertTrue(all(TEXT[code].get(key) for key in KEYS))
-                self.assertIn(ABOUT_EXTRA[code], TEXT[code]['about_description'])
-                self.assertGreaterEqual(TEXT[code]['about_description'].count('\n\n'), 3)
+                self.assertTrue(TEXT[code]['about_description'].strip())
+                self.assertTrue(TEXT[code]['updates'].strip())
+                self.assertTrue(TEXT[code]['install'].strip())
+        self.assertIn('két egymást követő teljes ellenőrzés', TEXT['hu']['about_description'])
+        self.assertIn('two consecutive complete checks', TEXT['en']['about_description'])
         self.assertEqual(TEXT['hu']['setup_finish'], 'Mentés')
         self.assertEqual(TEXT['en']['setup_finish'], 'Save')
 

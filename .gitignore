@@ -17,3 +17,7 @@ __pycache__/
 .tools/
 .test-tmp/
 test-results/
+
+# A telepítők a kiadási csomaghoz tartoznak, nem a forráskövetéshez.
+TorrentManager-Setup-*.exe
+qbittorrent_*_setup.exe
