@@ -1,5 +1,6 @@
 """v0.9 regressions for fixed operating mode and expired tracker sessions."""
 import sys
+import re
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -10,6 +11,18 @@ import policy
 
 
 class V09Tests(unittest.TestCase):
+    def test_installer_language_files_are_bundled(self):
+        root = Path(__file__).resolve().parents[1]
+        script = (root / 'installer.iss').read_text(encoding='utf-8')
+        files = re.findall(r'^Name: "[a-z]+"; MessagesFile: "([^"]+)"', script, re.M)
+        self.assertEqual(len(files), 12)
+        for name in files:
+            with self.subTest(name=name):
+                if name.startswith('compiler:'):
+                    self.assertEqual(name, 'compiler:Default.isl')
+                else:
+                    self.assertTrue((root / name.replace('\\', '/')).is_file())
+
     def test_all_legacy_modes_become_full(self):
         for mode in ('dry', 'add', 'full', 'unknown'):
             with self.subTest(mode=mode):

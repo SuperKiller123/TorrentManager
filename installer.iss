@@ -36,17 +36,17 @@ UninstallLogging=yes
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
-Name: "zh"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "zh"; MessagesFile: "installer-languages\ChineseSimplified.isl"
 Name: "hi"; MessagesFile: "installer-languages\Hindi.islu"
-Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
-Name: "fr"; MessagesFile: "compiler:Languages\French.isl"
-Name: "ar"; MessagesFile: "compiler:Languages\Arabic.isl"
+Name: "es"; MessagesFile: "installer-languages\Spanish.isl"
+Name: "fr"; MessagesFile: "installer-languages\French.isl"
+Name: "ar"; MessagesFile: "installer-languages\Arabic.isl"
 Name: "bn"; MessagesFile: "installer-languages\Bengali.islu"
-Name: "pt"; MessagesFile: "compiler:Languages\Portuguese.isl"
-Name: "ru"; MessagesFile: "compiler:Languages\Russian.isl"
+Name: "pt"; MessagesFile: "installer-languages\Portuguese.isl"
+Name: "ru"; MessagesFile: "installer-languages\Russian.isl"
 Name: "ur"; MessagesFile: "installer-languages\Urdu.isl"
-Name: "hu"; MessagesFile: "compiler:Languages\Hungarian.isl"
-Name: "de"; MessagesFile: "compiler:Languages\German.isl"
+Name: "hu"; MessagesFile: "installer-languages\Hungarian.isl"
+Name: "de"; MessagesFile: "installer-languages\German.isl"
 [LangOptions]
 en.LanguageName=English
 zh.LanguageName=中文（简体）
