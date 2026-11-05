@@ -96,8 +96,7 @@ class WizardTests(unittest.TestCase):
             with patch.object(wizard, 'SETTINGS', folder / 'settings.json'), \
                  patch.object(wizard, 'DATA_DIR', folder), \
                  patch.object(wizard, 'check_webui', side_effect=[(False, 'bad_credentials'), (True, 'connected')]) as check, \
-                 patch.object(integration, 'set_windows_startup') as startup, \
-                 patch.object(integration, 'set_desktop_shortcut') as desktop:
+                 patch.object(integration, 'set_windows_startup') as startup:
                 self.root.after(30, lambda: save_button().invoke())
                 self.root.after(350, retry)
                 self.root.after(3000, self.root.quit)
@@ -111,7 +110,6 @@ class WizardTests(unittest.TestCase):
                 self.assertEqual(check.call_count, 2)
                 self.assertEqual(check.call_args.args[2], ' secret ')
                 startup.assert_called_once_with(True)
-                desktop.assert_called_once_with(True)
 
 
 if __name__ == '__main__':

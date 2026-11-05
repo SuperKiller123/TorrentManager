@@ -3,7 +3,6 @@ import json
 import queue
 import threading
 import tkinter as tk
-import os
 import sys
 import subprocess
 from tkinter import ttk, filedialog, messagebox
@@ -11,7 +10,7 @@ from pathlib import Path
 from localization import tr
 from policy import validate_settings
 from webui import check_webui
-from paths import SETTINGS, DATA_DIR, BASE, find_playwright_browsers
+from paths import SETTINGS, DATA_DIR, BASE
 
 
 def run_setup(root, cfg):
@@ -129,28 +128,6 @@ def run_setup(root, cfg):
         help_label.pack(fill='x')
         help_label.bind('<Configure>', lambda e, w=help_label: w.configure(wraplength=max(150, e.width)))
 
-    label(connection, 'BitHuMen', 13, True).pack(anchor='w', pady=(10, 4))
-    hint = label(connection, T('setup_login'), 9, muted=True, justify='left')
-    hint.pack(fill='x')
-    hint.bind('<Configure>', lambda e: hint.configure(wraplength=max(150, e.width)))
-    login_proc = None
-    def login():
-        nonlocal login_proc
-        if login_proc is not None and login_proc.poll() is None:
-            return
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        cmd = ([str(BASE / 'TorrentLogin.exe')] if getattr(sys, 'frozen', False)
-               else [sys.executable, str(BASE / 'auth_browser.py')])
-        env = os.environ.copy()
-        browsers = find_playwright_browsers()
-        if browsers:
-            env['PLAYWRIGHT_BROWSERS_PATH'] = str(browsers)
-        try:
-            login_proc = subprocess.Popen(cmd, cwd=str(DATA_DIR), env=env,
-                creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-        except OSError as exc:
-            status.set(f"{T('setup_error')}: {exc}")
-    action(connection, T('login_open'), login).pack(anchor='w', pady=(8, 0))
     events = queue.Queue()
     result = None
     pending = None
@@ -161,15 +138,10 @@ def run_setup(root, cfg):
         nonlocal pending
         if pending is not None:
             return
-        if login_proc is not None and login_proc.poll() is None:
-            status.set(T('setup_close_browser'))
-            return
         try:
             candidate = validate_settings(dict(cfg, **{k:v.get() for k,v in variables.items()}))
             if not candidate['qb_save_path'] or not Path(candidate['qb_save_path']).is_dir():
                 status.set(T('help_qb_save_path'))
-                return
-            if candidate['mode'] == 'full' and not messagebox.askyesno('Torrent Manager', T('delete_full'), parent=root):
                 return
         except (ValueError, OSError) as exc:
             status.set(f"{T('setup_error')}: {exc}")
@@ -193,9 +165,8 @@ def run_setup(root, cfg):
             ready, message = events.get_nowait()
             if ready:
                 try:
-                    from windows_integration import set_windows_startup, set_desktop_shortcut
+                    from windows_integration import set_windows_startup
                     set_windows_startup(pending['startup'])
-                    set_desktop_shortcut(pending['desktopicon'])
                     pending['setup_complete'] = True
                     DATA_DIR.mkdir(parents=True, exist_ok=True)
                     tmp = SETTINGS.with_suffix('.json.tmp')

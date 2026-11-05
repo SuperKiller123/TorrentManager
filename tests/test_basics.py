@@ -27,7 +27,7 @@ class SettingsTests(unittest.TestCase):
    self.assertEqual(result['qb_password'],'')
    self.assertEqual(result['check_minutes'],5)
    self.assertEqual(result['max_managed_torrents'],50)
-   self.assertEqual(result['mode'],'dry')
+   self.assertEqual(result['mode'],'full')
 
  def test_saved_settings_take_precedence(self):
   with tempfile.TemporaryDirectory() as td,patch.dict(os.environ,{'LOCALAPPDATA':td}):

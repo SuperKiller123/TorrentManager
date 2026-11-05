@@ -1,5 +1,5 @@
 #define MyAppName "Torrent Manager"
-#define MyAppVersion "0.8"
+#define MyAppVersion "0.9"
 [Setup]
 #ifdef TM_TEST_ROOT
 AppId={{D186A29D-D24B-4A19-81C6-7EFD2330B872}
@@ -16,7 +16,7 @@ AppVersion={#MyAppVersion}
 UninstallDisplayName={#MyAppName}
 DefaultGroupName=Torrent Manager
 OutputDir=dist\installer
-OutputBaseFilename=TorrentManager-Setup-v0.8
+OutputBaseFilename=TorrentManager-Setup-v0.9
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -34,20 +34,19 @@ ShowLanguageDialog=yes
 LanguageDetectionMethod=none
 UninstallLogging=yes
 
-; All Setup text is consistently English, as explicitly accepted.
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
-Name: "zh"; MessagesFile: "compiler:Default.isl"
-Name: "hi"; MessagesFile: "compiler:Default.isl"
-Name: "es"; MessagesFile: "compiler:Default.isl"
-Name: "fr"; MessagesFile: "compiler:Default.isl"
-Name: "ar"; MessagesFile: "compiler:Default.isl"
-Name: "bn"; MessagesFile: "compiler:Default.isl"
-Name: "pt"; MessagesFile: "compiler:Default.isl"
-Name: "ru"; MessagesFile: "compiler:Default.isl"
-Name: "ur"; MessagesFile: "compiler:Default.isl"
-Name: "hu"; MessagesFile: "compiler:Default.isl"
-Name: "de"; MessagesFile: "compiler:Default.isl"
+Name: "zh"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "hi"; MessagesFile: "installer-languages\Hindi.islu"
+Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
+Name: "fr"; MessagesFile: "compiler:Languages\French.isl"
+Name: "ar"; MessagesFile: "compiler:Languages\Arabic.isl"
+Name: "bn"; MessagesFile: "installer-languages\Bengali.islu"
+Name: "pt"; MessagesFile: "compiler:Languages\Portuguese.isl"
+Name: "ru"; MessagesFile: "compiler:Languages\Russian.isl"
+Name: "ur"; MessagesFile: "installer-languages\Urdu.isl"
+Name: "hu"; MessagesFile: "compiler:Languages\Hungarian.isl"
+Name: "de"; MessagesFile: "compiler:Languages\German.isl"
 [LangOptions]
 en.LanguageName=English
 zh.LanguageName=中文（简体）
@@ -67,11 +66,34 @@ SelectLanguageLabel=Select the language for Torrent Manager.
 UninstallDisplayNameMark=%1
 UninstallDisplayNameMarks=%1
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Options:"; Flags: unchecked
-Name: "startup"; Description: "Start Torrent Manager with Windows"; GroupDescription: "Options:"; Flags: unchecked
-Name: "close_to_tray"; Description: "Keep running in the notification area when closing the window"; GroupDescription: "Options:"; Flags: unchecked
-Name: "pin_taskbar"; Description: "Pin to taskbar (instructions)"; GroupDescription: "Options:"; Flags: unchecked
-Name: "pin_start"; Description: "Pin to Start (instructions)"; GroupDescription: "Options:"; Flags: unchecked
+Name: "startup"; Description: "{cm:StartupTask}"; Flags: unchecked
+Name: "close_to_tray"; Description: "{cm:TrayTask}"; Flags: unchecked
+
+[CustomMessages]
+hu.StartupTask=Indítás a Windowszal
+hu.TrayTask=Bezáráskor futás az értesítési területen
+en.StartupTask=Start with Windows
+en.TrayTask=Close window to notification area
+de.StartupTask=Mit Windows starten
+de.TrayTask=Beim Schließen im Infobereich weiterlaufen
+zh.StartupTask=随 Windows 启动
+zh.TrayTask=关闭窗口后在通知区域继续运行
+hi.StartupTask=Windows के साथ शुरू करें
+hi.TrayTask=विंडो बंद करने पर सूचना क्षेत्र में चलते रहें
+es.StartupTask=Iniciar con Windows
+es.TrayTask=Seguir en el área de notificación al cerrar
+fr.StartupTask=Démarrer avec Windows
+fr.TrayTask=Rester dans la zone de notification à la fermeture
+ar.StartupTask=بدء التشغيل مع Windows
+ar.TrayTask=الاستمرار في منطقة الإشعارات عند إغلاق النافذة
+bn.StartupTask=Windows-এর সাথে চালু করুন
+bn.TrayTask=উইন্ডো বন্ধ করলে বিজ্ঞপ্তি এলাকায় চালু রাখুন
+pt.StartupTask=Iniciar com o Windows
+pt.TrayTask=Continuar na área de notificação ao fechar
+ru.StartupTask=Запускать с Windows
+ru.TrayTask=При закрытии оставлять в области уведомлений
+ur.StartupTask=Windows کے ساتھ شروع کریں
+ur.TrayTask=ونڈو بند ہونے پر اطلاعاتی حصے میں چلتے رہیں
 [Files]
 #ifdef TM_TEST_SOURCE
 Source: "{#TM_TEST_SOURCE}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -79,20 +101,17 @@ Source: "{#TM_TEST_SOURCE}\*"; DestDir: "{app}"; Flags: ignoreversion recursesub
 Source: "dist\TorrentManager\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 #endif
 Source: "uninstall_cleanup.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "pinning-help.html"; DestDir: "{app}"; Flags: ignoreversion
 #ifndef TM_TEST_ROOT
 [Icons]
 Name: "{autoprograms}\Torrent Manager"; Filename: "{app}\TorrentManager.exe"
 #endif
 [INI]
 Filename: "{app}\install-defaults.ini"; Section: "Settings"; Key: "language"; String: "{language}"
-Filename: "{app}\install-defaults.ini"; Section: "Settings"; Key: "desktopicon"; String: "{code:DesktopValue}"
 Filename: "{app}\install-defaults.ini"; Section: "Settings"; Key: "startup"; String: "{code:StartupValue}"
 Filename: "{app}\install-defaults.ini"; Section: "Settings"; Key: "close_to_tray"; String: "{code:TrayValue}"
 [Run]
 #ifndef TM_TEST_ROOT
 Filename: "{app}\TorrentManager.exe"; Description: "Launch Torrent Manager"; Flags: nowait postinstall skipifsilent runasoriginaluser
-Filename: "{app}\pinning-help.html"; Description: "Open pinning instructions"; Tasks: pin_taskbar or pin_start; Flags: shellexec nowait postinstall skipifsilent runasoriginaluser
 #endif
 [UninstallDelete]
 Type: files; Name: "{app}\install-defaults.ini"
@@ -102,10 +121,6 @@ var
   CleanupScript, CleanupReport: String;
   CleanupAvailable: Boolean;
 
-function DesktopValue(Param: String): String;
-begin
-  if WizardIsTaskSelected('desktopicon') then Result := 'true' else Result := 'false';
-end;
 function StartupValue(Param: String): String;
 begin
   if WizardIsTaskSelected('startup') then Result := 'true' else Result := 'false';
@@ -174,7 +189,7 @@ begin
   CleanupAvailable := FileCopy(ExpandConstant('{app}\uninstall_cleanup.ps1'), CleanupScript, False);
   Result := CleanupAvailable;
   if not Result then
-    MsgBox('The cleanup helper is missing. Reinstall Torrent Manager v0.8, then uninstall it again.', mbError, MB_OK);
+    MsgBox('The cleanup helper is missing. Reinstall Torrent Manager v0.9, then uninstall it again.', mbError, MB_OK);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

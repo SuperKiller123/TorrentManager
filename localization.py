@@ -221,3 +221,42 @@ for _code, _description in _ABOUT_V07.items():
 
 from localization_v08 import extend as _extend_v08
 _extend_v08(TEXT)
+for _code, _values in {
+    'hu': {'updates': 'Alkalmazás', 'install': 'Letöltés és telepítés',
+           'maintenance': 'Alkalmazás kezelése', 'uninstall': 'Eltávolítás',
+           'uninstall_confirm': 'Eltávolítod a Torrent Managert?',
+           'uninstall_missing': 'Nem található a telepített alkalmazás eltávolítója.',
+           'uninstall_windows': 'Az eltávolítás csak Windows alatt érhető el.'},
+    'en': {'updates': 'Application', 'install': 'Download and install',
+           'maintenance': 'Manage application', 'uninstall': 'Uninstall',
+           'uninstall_confirm': 'Uninstall Torrent Manager?',
+           'uninstall_missing': 'The installed application uninstaller was not found.',
+           'uninstall_windows': 'Uninstall is available only on Windows.'},
+}.items():
+    TEXT[_code].update(_values)
+for _code in LANGUAGES:
+    if _code not in ('hu', 'en'):
+        for _key in ('updates', 'install', 'maintenance', 'uninstall', 'uninstall_confirm', 'uninstall_missing', 'uninstall_windows'):
+            TEXT[_code][_key] = TEXT['en'][_key]
+for _code, _titles in {
+    'de': ('Anwendung', 'Herunterladen und installieren', 'Deinstallieren'),
+    'zh': ('应用程序', '下载并安装', '卸载'),
+    'hi': ('एप्लिकेशन', 'डाउनलोड और इंस्टॉल करें', 'अनइंस्टॉल करें'),
+    'es': ('Aplicación', 'Descargar e instalar', 'Desinstalar'),
+    'fr': ('Application', 'Télécharger et installer', 'Désinstaller'),
+    'ar': ('التطبيق', 'تنزيل وتثبيت', 'إلغاء التثبيت'),
+    'bn': ('অ্যাপ্লিকেশন', 'ডাউনলোড ও ইনস্টল করুন', 'আনইনস্টল করুন'),
+    'pt': ('Aplicativo', 'Baixar e instalar', 'Desinstalar'),
+    'ru': ('Приложение', 'Скачать и установить', 'Удалить'),
+    'ur': ('ایپلیکیشن', 'ڈاؤن لوڈ اور انسٹال کریں', 'ان انسٹال کریں'),
+}.items():
+    TEXT[_code].update(zip(('updates', 'install', 'uninstall'), _titles))
+TEXT['hu']['about_description'] = ('A Torrent Manager a BitHuMen toplistájából választ, és a qBittorrent WebUI-n keresztül kezeli a torrenteket. '
+    'A fájlokkal együtt csak a saját nyilvántartott torrentjeit távolíthatja el, két egymást követő teljes ellenőrzés után. '
+    'A frissítő SHA-256 ellenőrzést végez. A tracker elérése és a qBittorrent működése külön szolgáltatásoktól függ.')
+TEXT['en']['about_description'] = ('Torrent Manager selects from the BitHuMen list and manages torrents through qBittorrent WebUI. '
+    'It can delete files only for torrents recorded as its own, after two consecutive complete checks. '
+    'The updater verifies SHA-256 checksums. Tracker and qBittorrent availability depend on their separate services.')
+for _code in LANGUAGES:
+    if _code not in ('hu', 'en'):
+        TEXT[_code]['about_description'] = TEXT['en']['about_description']

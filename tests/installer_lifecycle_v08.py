@@ -56,7 +56,7 @@ def run():
     setup = root / 'TorrentManager-test-v08.exe'
     app = root / 'Torrent Manager'
     installed = subprocess.run([str(setup), '/VERYSILENT', '/SUPPRESSMSGBOXES',
-        '/NORESTART', '/LANG=hu', '/TASKS=desktopicon,startup,close_to_tray,pin_taskbar,pin_start',
+        '/NORESTART', '/LANG=hu', '/TASKS=startup,close_to_tray',
         f'/LOG={root / "install.log"}'], timeout=120)
     if installed.returncode:
         raise RuntimeError(f'Install exit code {installed.returncode}; fixture at {root}')

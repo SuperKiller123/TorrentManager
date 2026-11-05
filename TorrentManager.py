@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Torrent Manager v0.8 – Windows UI for the safe torrent engine."""
+"""Torrent Manager v0.9 – Windows UI for the torrent engine."""
 import json
 import os
 import queue
@@ -20,7 +20,7 @@ from updater import VERSION, list_releases, download_installer, UpdateError, par
 from localization import tr, LANGUAGES
 from webui import check_webui, webui_session, read_telemetry
 from windows_integration import (launch_qbittorrent, apply_windows_titlebar,
-                                 set_windows_startup, set_desktop_shortcut, FullscreenController)
+                                 set_windows_startup, FullscreenController)
 
 DARK = dict(bg='#0C1220', sidebar='#111B2B', panel='#151F31', panel_hi='#1D2B42',
             input='#0F1A2B', text='#EEF5FF', muted='#99ADC4', line='#29374C',
@@ -102,7 +102,6 @@ class App:
         self.update_message = tk.StringVar(value='')
         self.stat_disk = tk.StringVar(value='–')
         self.stat_used = tk.StringVar(value='–')
-        self.home_mode = tk.StringVar(value='')
         self.home_details = tk.StringVar(value='')
         self.status = tk.StringVar(value='')
         self.webui_status = tk.StringVar(value='')
@@ -332,13 +331,12 @@ class App:
         interior.pack(fill='both', expand=True)
         self.dashboard_canvas = None
         metrics = tk.Frame(interior, bg=P['bg'])
-        metrics.pack(fill='both', expand=True, pady=(0, 9))
-        metrics.rowconfigure(0, weight=1)
+        metrics.pack(fill='x', pady=(0, 9))
         for i in range(4):
             metrics.columnconfigure(i, weight=1, uniform='metric')
         self.metric_auto = tk.StringVar()
         cards = [(self.T('automation'), self.metric_auto), (self.T('total'), self.live_torrents),
-                 (self.T('mode'), self.home_mode), (self.T('next'), self.next_check)]
+                 (self.T('next'), self.next_check)]
         for i, (head, var) in enumerate(cards):
             metric = self._metric(metrics, head, var)
             if i == 3:
@@ -346,9 +344,17 @@ class App:
                     if isinstance(label, tk.Label) and str(label.cget('textvariable')):
                         label.configure(font=(FONT, 12, 'bold'))
             metric.grid(row=0, column=i, sticky='nsew', padx=(0, 5) if i < 3 else 0)
+        system = self._card(metrics, 11)
+        system.grid(row=0, column=3, sticky='nsew')
+        self._label(system, self.T('connection'), 10, bold=True).pack(anchor='w')
+        self.qb_indicator = self._label(system, '○  qBittorrent', 9, 'muted')
+        self.qb_indicator.pack(anchor='w')
+        self.webui_indicator = self._label(system, '', 9, 'amber')
+        self.webui_indicator.pack(anchor='w')
+        self.bit_indicator = self._label(system, '○  BitHuMen', 9, 'muted')
+        self.bit_indicator.pack(anchor='w')
         extra = tk.Frame(interior, bg=P['bg'])
-        extra.pack(fill='both', expand=True, pady=(0, 9))
-        extra.rowconfigure(0, weight=1)
+        extra.pack(fill='x', pady=(0, 9))
         for i in range(4):
             extra.columnconfigure(i, weight=1, uniform='extra')
         self.mini_total = tk.StringVar(value='–')
@@ -370,33 +376,21 @@ class App:
         self._label(dline, self.T('disk_info'), 11, bold=True).pack(side='left')
         tk.Label(dline, textvariable=self.stat_used, bg=P['panel'], fg=P['muted'],
                  font=(FONT, 10)).pack(side='right')
-        self.disk_track = tk.Canvas(disk, height=13, bg=P['panel'], bd=0, highlightthickness=0)
+        self.disk_track = tk.Canvas(disk, height=27, bg=P['panel'], bd=0, highlightthickness=0)
         self.disk_track.pack(fill='x', pady=(12, 5))
         self.disk_track.bind('<Configure>', lambda _: self._paint_disk_bar())
         more = tk.Frame(interior, bg=P['bg'])
-        more.pack(fill='x', pady=(0, 9))
-        more.rowconfigure(0, weight=1)
-        for i in range(2):
-            more.columnconfigure(i, weight=1, uniform='more')
+        more.pack(fill='both', expand=True, pady=(0, 9))
         limits = self._card(more)
-        limits.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
+        limits.pack(fill='both', expand=True)
         self._label(limits, self.T('transfer'), 12, bold=True).pack(anchor='w')
-        self.speed_chart = tk.Canvas(limits, height=70, bg=P['panel'], highlightthickness=0)
+        self.speed_chart = tk.Canvas(limits, height=100, bg=P['panel'], highlightthickness=0)
         self.speed_chart.pack(fill='both', expand=True)
         self.speed_chart.bind('<Configure>', lambda _: self._paint_speed())
-        system = self._card(more)
-        system.grid(row=0, column=1, sticky='nsew')
-        self._label(system, self.T('connection'), 12, bold=True).pack(anchor='w', pady=(0, 7))
-        self.qb_indicator = self._label(system, '○  qBittorrent', 10, 'muted')
-        self.qb_indicator.pack(anchor='w', pady=2)
-        self.webui_indicator = self._label(system, '', 10, 'amber')
-        self.webui_indicator.pack(anchor='w', pady=2)
-        self.bit_indicator = self._label(system, '○  BitHuMen', 10, 'muted')
-        self.bit_indicator.pack(anchor='w', pady=2)
         logcard = self._card(interior)
         logcard.pack(fill='x', pady=(0, 9))
         self._label(logcard, self.T('recent'), 12, bold=True).pack(anchor='w', pady=(0, 8))
-        self.preview = tk.Text(logcard, height=3, bg=P['input'], fg=P['text'], relief='flat',
+        self.preview = tk.Text(logcard, height=5, bg=P['input'], fg=P['text'], relief='flat',
                                bd=0, padx=12, pady=11, wrap='word',
                                font=(FONT, 10), state='disabled')
         self.preview.pack(fill='both', expand=True)
@@ -453,19 +447,6 @@ class App:
                                          ('max_disk_usage_percent', 'limit_percent'),
                                          ('min_size_gb', 'min_gb'), ('max_size_gb', 'max_gb')]):
             self._input(group, key, self.T(title), i)
-        operation = self._card(interior, 18)
-        operation.pack(fill='x', pady=(0, 12))
-        self._label(operation, self.T('safety'), 12, bold=True).pack(anchor='w', pady=(0, 8))
-        self.vars['mode'] = tk.StringVar(value=self.cfg.get('mode', 'dry'))
-        for mode, label in (('dry', 'dry_full'), ('add', 'add_full'), ('full', 'delete_full')):
-            tk.Radiobutton(operation, text=self.T(label), value=mode, variable=self.vars['mode'],
-                           font=(FONT, 10), bg=P['panel'], fg=P['text'], selectcolor=P['input'],
-                           activebackground=P['panel'], activeforeground=P['text']).pack(anchor='w', pady=4)
-        login_row = self._card(interior, 14)
-        login_row.pack(fill='x', pady=(0, 12))
-        self._label(login_row, self.T('login_title'), 11, bold=True).pack(side='left')
-        self._button(login_row, self.T('login_open'), self.open_bithumen_login,
-                     'secondary', True).pack(side='right')
         appearance = self._card(interior, 18)
         appearance.pack(fill='x', pady=(0, 12))
         self._label(appearance, self.T('appearance'), 12, bold=True).pack(anchor='w', pady=(0, 11))
@@ -493,7 +474,7 @@ class App:
         self.language_box.pack(side='left', fill='x', expand=True)
         self.language_box.bind('<<ComboboxSelected>>', lambda _: self.vars['language'].set(codes[self.language_box.current()]))
         self._label(appearance, self.T('language_note'), 9, 'muted').pack(anchor='w')
-        for key in ('startup', 'close_to_tray', 'desktopicon'):
+        for key in ('startup', 'close_to_tray'):
             self.vars[key] = tk.BooleanVar(value=self.cfg.get(key, False))
             tk.Checkbutton(appearance, text=self.T(key), variable=self.vars[key],
                            bg=P['panel'], fg=P['text'], selectcolor=P['input']).pack(anchor='w')
@@ -557,12 +538,14 @@ class App:
         self.check_button = self._button(buttons, self.T('check'), self.check_updates, 'secondary')
         self.check_button.pack(side='left')
         self.version_choice = tk.StringVar()
-        self.versions_box = ttk.Combobox(actions, textvariable=self.version_choice,
-                                          state='readonly', style='TM.TCombobox', width=38)
-        self.versions_box.pack(fill='x', pady=(0, 9))
-        self.versions_box.bind('<<ComboboxSelected>>', lambda _e: self._update_install_enabled())
         self.install_button = self._button(actions, self.T('install'), self.install_update, state='disabled')
         self.install_button.pack(fill='x', pady=(0, 9))
+        maintenance = self._card(interior, 18)
+        maintenance.pack(fill='x', pady=(0, 10))
+        self._label(maintenance, self.T('maintenance'), 12, bold=True).pack(anchor='w', pady=(0, 8))
+        self.reinstall_button = self._button(maintenance, self.T('reinstall'), self.reinstall, 'secondary', True, 'disabled')
+        self.reinstall_button.pack(side='left', padx=(0, 10))
+        self._button(maintenance, self.T('uninstall'), self.uninstall, 'secondary', True).pack(side='left')
         self._label(actions, self.T('download_note'), 9, 'muted', wraplength=720, justify='left').pack(anchor='w')
         about = self._card(interior, 18)
         about.pack(fill='both', expand=True)
@@ -676,16 +659,10 @@ class App:
     def save(self):
         try:
             new = self._validated_settings()
-            if new['mode'] == 'full' and self.cfg.get('mode') != 'full':
-                if not messagebox.askyesno('Végleges fájltörlés',
-                    'A kezelt torrentek és letöltött fájljaik törlődhetnek. Engedélyezed?', parent=self.root):
-                    return False
             changed_view = (new['theme'], new['language']) != (self.cfg.get('theme'), self.cfg.get('language'))
             changed_webui = any(new[k] != self.cfg.get(k) for k in ('qb_url','qb_username','qb_password'))
             if new['startup'] != self.cfg['startup']:
                 set_windows_startup(new['startup'])
-            if new['desktopicon'] != self.cfg['desktopicon']:
-                set_desktop_shortcut(new['desktopicon'])
             DATA_DIR.mkdir(parents=True, exist_ok=True)
             tmp = SETTINGS.with_suffix('.json.tmp')
             tmp.write_text(json.dumps(new, indent=2, ensure_ascii=False), encoding='utf-8')
@@ -906,8 +883,6 @@ class App:
         if not self._animating_bar:
             self._animating_bar = True
             self._animate_disk()
-        mode = self.T(cfg.get('mode','dry'))
-        self.home_mode.set(mode)
         lo, hi = cfg.get('min_size_gb',''), cfg.get('max_size_gb','')
         sizes = (f'{lo or "–"} – {hi or "–"} GB') if lo or hi else self.T('no_limit')
         if hasattr(self, 'mini_total'):
@@ -939,27 +914,27 @@ class App:
             self.events.put(('line', 'qBittorrent indítási hiba: ' + str(exc)))
 
     def _releases_to_combobox(self):
-        if not hasattr(self, 'versions_box'):
+        if not hasattr(self, 'install_button'):
             return
         self.release_by_version = {item['version']: item for item in self.releases}
-        options = [i['version'] for i in self.releases]
-        self.versions_box.configure(values=options)
-        if self.version_choice.get() not in options:
-            self.version_choice.set(next((v for v in options if v == 'v' + VERSION), options[0] if options else ''))
         self._update_install_enabled()
 
     def _update_install_enabled(self):
-        release = self.release_by_version.get(self.version_choice.get())
+        release = next((item for item in self.releases if parse_version(item['version']) > parse_version(VERSION)
+                        and item.get('installer') and item.get('checksums')), None)
+        self.version_choice.set(release['version'] if release else '')
         enabled = (not self.downloading and release is not None and release['installer'] is not None
                    and release['checksums'] is not None
                    )
-        label = 'install'
-        if release:
-            comparison = parse_version(release['version'])
-            label = ('reinstall' if comparison == parse_version(VERSION) else
-                     'install_older' if comparison < parse_version(VERSION) else 'install')
-        self.install_button.configure(text=self.T(label), state='normal' if enabled else 'disabled',
+        self.install_button.configure(text=self.T('install'), state='normal' if enabled else 'disabled',
                                       bg=P['blue'] if enabled else P['line'])
+        current = next((item for item in self.releases if parse_version(item['version']) == parse_version(VERSION)), None)
+        self.reinstall_button.configure(state='normal' if not self.downloading and current and
+                                        current.get('installer') and current.get('checksums') else 'disabled')
+
+    def reinstall(self):
+        current = next((item for item in self.releases if parse_version(item['version']) == parse_version(VERSION)), None)
+        self._download_release(current)
 
     def check_updates(self):
         self.check_button.configure(state='disabled')
@@ -972,10 +947,12 @@ class App:
         threading.Thread(target=work, daemon=True).start()
 
     def install_update(self):
+        self._download_release(self.release_by_version.get(self.version_choice.get()))
+
+    def _download_release(self, release):
         if os.name != 'nt':
             messagebox.showinfo('Windows', 'A telepítő kizárólag Windows alatt indítható.', parent=self.root)
             return
-        release = self.release_by_version.get(self.version_choice.get())
         if self.downloading or not release or not release.get('installer') or not release.get('checksums'):
             return
         version = release['version']
@@ -1002,6 +979,30 @@ class App:
             except Exception as exc:
                 self.events.put(('download_error', str(exc)))
         threading.Thread(target=work, daemon=True).start()
+
+    def uninstall(self):
+        if os.name != 'nt':
+            messagebox.showinfo('Windows', self.T('uninstall_windows'), parent=self.root)
+            return
+        uninstallers = sorted(BASE.glob('unins*.exe'))
+        if not uninstallers:
+            messagebox.showerror('Torrent Manager', self.T('uninstall_missing'), parent=self.root)
+            return
+        if not messagebox.askyesno('Torrent Manager', self.T('uninstall_confirm'), parent=self.root):
+            return
+        self._close_login()
+        if self.proc and self.proc.poll() is None:
+            self.stop()
+        try:
+            subprocess.Popen([str(uninstallers[-1])], cwd=str(BASE),
+                             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        except OSError as exc:
+            messagebox.showerror('Torrent Manager', str(exc), parent=self.root)
+            return
+        self.closed = True
+        if self.tray:
+            self.tray.stop()
+        self.root.destroy()
 
     def _run_installer(self, installer):
         try:
@@ -1072,6 +1073,9 @@ class App:
                         self._status(False)
                         self.append(f'A háttérprogram leállt. Kilépési kód: {code}.')
                         self.proc = None
+                        if code == 2 and not self.closed:
+                            self.pending_start = True
+                            self.root.after(300, lambda: self.open_bithumen_login(automatic=True))
                 elif kind == 'webui':
                     signature, connected, message = data
                     current = tuple(self.cfg.get(key) for key in ('qb_url','qb_username','qb_password'))

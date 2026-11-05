@@ -40,10 +40,10 @@ class V05SettingsTests(unittest.TestCase):
 
     def test_mode_migration_keeps_delete_protection(self):
         a=policy.normalize_settings({'dry_run':False,'enable_additions':True,'enable_deletions':True,'delete_files':False})
-        self.assertEqual(a['mode'],'add')
+        self.assertEqual(a['mode'],'full')
 
     def test_version(self):
-        self.assertEqual(updater.VERSION,'0.8')
+        self.assertEqual(updater.VERSION,'0.9')
 
     def test_new_gui_does_not_expose_removed_controls(self):
         src=(Path(__file__).resolve().parents[1]/'TorrentManager.py').read_text(encoding='utf8')

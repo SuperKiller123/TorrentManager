@@ -197,12 +197,12 @@ def wait_for_bithumen_login(page,c):
  while True:
   current=urlparse(page.url)
   # Never navigate away while the user is filling in the login form.
-  if current.path.endswith("/login.php"):
+  if "login" in current.path.lower() or page.locator('input[type="password"]').count():
    raise TrackerLoginRequired("BitHuMen bejelentkezés szükséges.")
   try:
    page.goto(TOP_URL,wait_until="domcontentloaded",timeout=45000)
    current=urlparse(page.url)
-   if current.path.endswith("/login.php"):
+   if "login" in current.path.lower() or page.locator('input[type="password"]').count():
     raise TrackerLoginRequired("BitHuMen bejelentkezés szükséges.")
    if current.path.endswith("/browse.php") and parse_list(page,c):
     log("BitHuMen bejelentkezés ellenőrizve; toplista elérhető.")

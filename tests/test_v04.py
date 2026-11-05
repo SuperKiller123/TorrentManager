@@ -25,7 +25,7 @@ class SettingsPolicyTests(unittest.TestCase):
         migrated=policy.normalize_settings({'dry_run':False,'enable_additions':True,
             'enable_deletions':True,'delete_files':False,'browse_url':'wrong','top_count':1,
             'max_disk_usage_percent':70.0, 'github_repository':''})
-        self.assertEqual(migrated['mode'],'add')
+        self.assertEqual(migrated['mode'],'full')
         self.assertEqual(migrated['max_disk_usage_percent'],70)
         self.assertNotIn('github_repository',migrated)
         for obsolete in ('browse_url','top_count','enable_additions','delete_files'):
@@ -91,22 +91,9 @@ class DeleteTests(unittest.TestCase):
                 motor.cycle(None,None,c,st)
                 self.assertEqual(deleted,['abcdef'])
                 self.assertNotIn('1',st)
-    def test_no_deletion_in_dry_mode_even_after_many_cycles(self):
-        with tempfile.TemporaryDirectory() as td:
-            target=Path(td)
-            st={'1':{'hash':'abc','name':'Old','missing_scans':0}}
-            listing=[{'hash':'abc','name':'Old','save_path':str(target)}]
-            c=policy.validate_settings({'max_managed_torrents':1,'mode':'dry','qb_save_path':str(target)})
-            with patch.object(motor,'collect_top_pages',return_value=[{'id':'2','name':'New','seeders':4}]),\
-                 patch.object(motor,'qb_torrents',return_value=listing),\
-                 patch.object(motor,'target_path',return_value=target),\
-                 patch.object(motor,'disk_percent',return_value=15),\
-                 patch.object(motor,'delete_owned') as deletion,\
-                 patch.object(motor,'STATE',target/'state.json'),\
-                 patch.object(motor,'log'):
-                for _ in range(4):motor.cycle(None,None,c,st)
-                deletion.assert_not_called()
-                self.assertEqual(st['1']['missing_scans'],0)
+    def test_legacy_dry_mode_is_migrated_to_full(self):
+        self.assertEqual(policy.validate_settings({'mode':'dry'})['mode'], 'full')
+        self.assertEqual(policy.validate_settings({'mode':'add'})['mode'], 'full')
     def test_incomplete_list_cannot_delete(self):
         with tempfile.TemporaryDirectory() as td:
             target=Path(td)

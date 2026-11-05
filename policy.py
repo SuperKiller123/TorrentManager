@@ -8,7 +8,7 @@ DEFAULT = {
     "qb_url": "http://127.0.0.1:8080", "qb_username": "admin",
     "qb_password": "", "qb_save_path": "", "check_minutes": 5,
     "max_disk_usage_percent": 70, "max_managed_torrents": 50,
-    "min_size_gb": "", "max_size_gb": "", "mode": "dry",
+    "min_size_gb": "", "max_size_gb": "", "mode": "full",
     "headless": True, "theme": "dark", "language": "hu",
     "startup": False, "close_to_tray": False, "desktopicon": False,
     "setup_complete": False,
@@ -35,13 +35,7 @@ def normalize_settings(saved):
         result["min_size_gb"] = _legacy_gib_to_gb(saved["min_size_gib"])
     if "max_size_gb" not in saved and "max_size_gib" in saved:
         result["max_size_gb"] = _legacy_gib_to_gb(saved["max_size_gib"])
-    if "mode" not in saved:
-        if saved.get("dry_run", True):
-            result["mode"] = "dry"
-        elif saved.get("enable_additions", False):
-            result["mode"] = "full" if saved.get("enable_deletions") and saved.get("delete_files") else "add"
-    if result["mode"] not in MODES:
-        result["mode"] = "dry"
+    result["mode"] = "full"
     disk = result.get("max_disk_usage_percent")
     if isinstance(disk, float) and disk.is_integer():
         result["max_disk_usage_percent"] = int(disk)

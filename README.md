@@ -1,16 +1,16 @@
-# Torrent Manager v0.8
+# Torrent Manager v0.9 (fejlesztői forrás)
 
-Windowsos qBittorrent- és BitHuMen-kezelő. Részletes változások, bizonyított eredmények és nyitott korlátok: [TESZTELES-v0.8.md](TESZTELES-v0.8.md).
+Windowsos qBittorrent- és BitHuMen-kezelő. A v0.9 forrása a bejelentkezési munkamenet helyreállítását, a végleges működési módot és az átrendezett felületet tartalmazza. A v0.8 korábbi tesztjegyzőkönyve: [TESZTELES-v0.8.md](TESZTELES-v0.8.md).
 
 ## Használat
 
-A TorrentManager-Setup-v0.8.exe alapértelmezetten a Program Files/Torrent Manager mappába telepít, rendszergazdai jogosultsággal. Egyetlen nyelvválasztás határozza meg a program nyelvét; a telepítő egységesen angol. Az első indítás témázott, egyoldalas beállításánál add meg a WebUI-adatokat, letöltési mappát és korlátokat. A Mentés sikeres kapcsolatellenőrzést igényel.
+A TorrentManager-Setup-v0.9.exe alapértelmezetten a Program Files/Torrent Manager mappába telepít, rendszergazdai jogosultsággal. A nyelvválasztás a telepítő és a program nyelvét is meghatározza. Az első indítás témázott, egyoldalas beállításánál add meg a WebUI-adatokat, letöltési mappát és korlátokat. A Mentés sikeres kapcsolatellenőrzést igényel.
 
-Induláskor a program ellenőrzi a BitHuMen-munkamenetet; ha belépés szükséges, megnyitja a böngészőt. A jelszót a felhasználó írja be. Az automatizálás az Indítás gombbal indul. Az alapmód próbaüzem; módváltás a Beállításokban. A teljes mód saját nyilvántartott torrenteket és fájljaikat törölheti.
+Induláskor a program ellenőrzi a BitHuMen-munkamenetet; ha belépés szükséges, megnyitja a böngészőt. A jelszót a felhasználó írja be. Ha az automatizálás alatt jár le a munkamenet, a program új belépést kér és siker esetén folytatja. Az automatizálás teljes módban működik: csak a saját nyilvántartott torrentjeit és fájljaikat törölheti, két hiánytalan ellenőrzés után.
 
-A Windowszal indulás, asztali parancsikon, háttérben futás, téma és nyelv a Beállításokban módosítható. A tálca-/Start-kitűzéshez a telepítő útmutatót kínál, a kitűzés felhasználói művelet. F11 kapcsolja a teljes képernyőt, Esc nem lép ki belőle.
+A Windowszal indulás, háttérben futás, téma és nyelv a Beállításokban módosítható. F11 kapcsolja a teljes képernyőt, Esc nem lép ki belőle.
 
-A kiadáslista automatikusan betöltődik; a telepítés külön kérésre indul. Azonos verzió újratelepítésként jelenik meg. A frissítő SHA-256 ellenőrzést végez és menti a beállításokat.
+Az Alkalmazás fül automatikusan keresi az újabb kiadást. A letöltés és telepítés gomb csak ellenőrzött újabb kiadásnál aktív; a jelenlegi verzió újratelepítése külön művelet. A frissítő SHA-256 ellenőrzést végez és menti a beállításokat. Az Eltávolítás a telepített Inno eltávolítót indítja.
 
 ## Adatok és eltávolítás
 
@@ -41,4 +41,4 @@ $env:PLAYWRIGHT_BROWSERS_PATH=Join-Path $PWD '.browser-cache'
 
 Külön próbák: tests/live_qb_smoke.py (üres külön qB-profil), tests/installer_lifecycle_v08.py (külön Inno AppId és próbaadatok), tests/frozen_smoke.py (EXE első indítás). A tesztkönyvtárakat ne tedd kiadásba. A forráscsomag engedélyezett fájltípusokból a package-source.ps1 segítségével készül.
 
-A v0.8 helyi csomag; a GitHubra közzétételt ez a munkamenet nem végzi el. A teljes hibamentesség és minden Windows-környezet kompatibilitása nem igazolt.
+A v0.9 forrásának valós BitHuMen- és qBittorrent-kapcsolaton, valamint fordított Windows-telepítővel végzett ellenőrzése szükséges a kiadás előtt.

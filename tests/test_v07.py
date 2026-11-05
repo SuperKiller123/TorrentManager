@@ -152,8 +152,7 @@ class TkTests(unittest.TestCase):
             folder = Path(td)
             with patch.object(wizard,'SETTINGS',folder/'settings.json'), \
                  patch.object(wizard,'DATA_DIR',folder), \
-                 patch.object(integration,'set_windows_startup') as startup, \
-                 patch.object(integration,'set_desktop_shortcut') as desktop:
+                 patch.object(integration,'set_windows_startup') as startup:
                 root.after(50,fill_and_submit)
                 root.after(6000,root.quit)
                 try:
@@ -161,7 +160,6 @@ class TkTests(unittest.TestCase):
                     self.assertIsNotNone(cfg)
                     self.assertTrue(json.loads((folder/'settings.json').read_text(encoding='utf-8'))['setup_complete'])
                     startup.assert_called_once_with(False)
-                    desktop.assert_called_once_with(False)
                 finally:
                     for job in root.tk.call('after','info'):
                         root.after_cancel(job)
@@ -227,7 +225,7 @@ class TkTests(unittest.TestCase):
                 self.assertFalse(app.fullscreen.active)
                 app.releases = [{'version':'v0.7','installer':{},'checksums':{}}]
                 app._releases_to_combobox()
-                self.assertEqual(str(app.install_button['state']),'normal')
+                self.assertEqual(str(app.install_button['state']),'disabled')
                 self.assertFalse(errors, errors)
             finally:
                 app.closed = True
