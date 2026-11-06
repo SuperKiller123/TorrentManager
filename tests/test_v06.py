@@ -36,7 +36,7 @@ class Session:
 
 class V06Tests(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(VERSION, '0.9')
+        self.assertEqual(VERSION, '1.0')
     def test_12_languages_with_hungarian_and_german(self):
         self.assertEqual(len(LANGUAGES), 12)
         for code in LANGUAGES:

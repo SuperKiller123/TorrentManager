@@ -17,7 +17,7 @@ def run_setup(root, cfg):
     # Import at invocation to share the actual application's palette without
     # constructing its dashboard or starting any worker processes.
     from TorrentManager import DARK, LIGHT, FONT, theme_is_dark
-    from windows_integration import apply_windows_titlebar
+    from windows_integration import apply_windows_titlebar, FullscreenController
     dark = theme_is_dark(cfg.get('theme', 'dark'))
     colors = DARK if dark else LIGHT
     T = lambda key: tr(cfg['language'], key)
@@ -35,6 +35,8 @@ def run_setup(root, cfg):
     except tk.TclError:
         pass
     apply_windows_titlebar(root, dark, colors['bg'], show_icon=True)
+    fullscreen = FullscreenController(root, lambda: apply_windows_titlebar(root, dark, colors['bg'], show_icon=True))
+    f11_binding = root.bind('<F11>', lambda _event: (fullscreen.toggle(), 'break')[1], add='+')
     frame = tk.Frame(root, bg=colors['bg'], padx=24, pady=18)
     frame.pack(fill='both', expand=True)
 
@@ -201,5 +203,8 @@ def run_setup(root, cfg):
     if poll_id:
         root.after_cancel(poll_id)
     root.unbind('<MouseWheel>', wheel_id)
+    root.unbind('<F11>', f11_binding)
+    if fullscreen.active:
+        fullscreen.toggle()
     frame.destroy()
     return result

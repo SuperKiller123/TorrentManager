@@ -12,9 +12,9 @@ import update_helper
 
 class ReleaseStateTests(unittest.TestCase):
     def test_current_and_zero_patch_are_not_upgrades(self):
-        for tag in ('v0.9', '0.9.0', 'v0.9.0.0', 'v0.8'):
+        for tag in ('v1.0', '1.0.0', 'v1.0.0.0', 'v0.9'):
             self.assertEqual(updater.release_state([{'version': tag}]), 'up_to_date')
-        self.assertEqual(updater.release_state([{'version': 'v0.9.1'}]), 'update_available')
+        self.assertEqual(updater.release_state([{'version': 'v1.0.1'}]), 'update_available')
         self.assertEqual(updater.release_state([]), 'no_releases')
 
     def run_helper(self, effect):

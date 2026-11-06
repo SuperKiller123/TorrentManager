@@ -1,5 +1,5 @@
 #define MyAppName "Torrent Manager"
-#define MyAppVersion "0.9"
+#define MyAppVersion "1.0"
 [Setup]
 #ifdef TM_TEST_ROOT
 AppId={{D186A29D-D24B-4A19-81C6-7EFD2330B872}
@@ -16,7 +16,7 @@ AppVersion={#MyAppVersion}
 UninstallDisplayName={#MyAppName}
 DefaultGroupName=Torrent Manager
 OutputDir=dist\installer
-OutputBaseFilename=TorrentManager-Setup-v0.9
+OutputBaseFilename=TorrentManager-Setup-v1.0
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -33,6 +33,8 @@ UsePreviousLanguage=yes
 ShowLanguageDialog=yes
 LanguageDetectionMethod=none
 UninstallLogging=yes
+DisableReadyPage=yes
+DisableFinishedPage=yes
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
@@ -68,32 +70,45 @@ UninstallDisplayNameMarks=%1
 [Tasks]
 Name: "startup"; Description: "{cm:StartupTask}"; Flags: unchecked
 Name: "close_to_tray"; Description: "{cm:TrayTask}"; Flags: unchecked
+Name: "minimize_to_tray"; Description: "{cm:MinimizeTrayTask}"; Flags: unchecked
 
 [CustomMessages]
 hu.StartupTask=Indítás a Windowszal
 hu.TrayTask=Bezáráskor futás az értesítési területen
+hu.MinimizeTrayTask=Tálcára helyezéskor futtatás az értesítési területen
 en.StartupTask=Start with Windows
 en.TrayTask=Close window to notification area
+en.MinimizeTrayTask=Run in notification area when minimized
 de.StartupTask=Mit Windows starten
 de.TrayTask=Beim Schließen im Infobereich weiterlaufen
+de.MinimizeTrayTask=Beim Minimieren im Infobereich weiterlaufen
 zh.StartupTask=随 Windows 启动
 zh.TrayTask=关闭窗口后在通知区域继续运行
+zh.MinimizeTrayTask=最小化时在通知区域运行
 hi.StartupTask=Windows के साथ शुरू करें
 hi.TrayTask=विंडो बंद करने पर सूचना क्षेत्र में चलते रहें
+hi.MinimizeTrayTask=छोटा करने पर सूचना क्षेत्र में चलाएँ
 es.StartupTask=Iniciar con Windows
 es.TrayTask=Seguir en el área de notificación al cerrar
+es.MinimizeTrayTask=Ejecutar en el área de notificación al minimizar
 fr.StartupTask=Démarrer avec Windows
 fr.TrayTask=Rester dans la zone de notification à la fermeture
+fr.MinimizeTrayTask=Exécuter dans la zone de notification si réduit
 ar.StartupTask=بدء التشغيل مع Windows
 ar.TrayTask=الاستمرار في منطقة الإشعارات عند إغلاق النافذة
+ar.MinimizeTrayTask=التشغيل في منطقة الإشعارات عند التصغير
 bn.StartupTask=Windows-এর সাথে চালু করুন
 bn.TrayTask=উইন্ডো বন্ধ করলে বিজ্ঞপ্তি এলাকায় চালু রাখুন
+bn.MinimizeTrayTask=মিনিমাইজ করলে বিজ্ঞপ্তি এলাকায় চালান
 pt.StartupTask=Iniciar com o Windows
 pt.TrayTask=Continuar na área de notificação ao fechar
+pt.MinimizeTrayTask=Executar na área de notificação ao minimizar
 ru.StartupTask=Запускать с Windows
 ru.TrayTask=При закрытии оставлять в области уведомлений
+ru.MinimizeTrayTask=При сворачивании работать в области уведомлений
 ur.StartupTask=Windows کے ساتھ شروع کریں
 ur.TrayTask=ونڈو بند ہونے پر اطلاعاتی حصے میں چلتے رہیں
+ur.MinimizeTrayTask=چھوٹا کرنے پر اطلاعاتی حصے میں چلائیں
 [Files]
 #ifdef TM_TEST_SOURCE
 Source: "{#TM_TEST_SOURCE}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -109,9 +124,10 @@ Name: "{autoprograms}\Torrent Manager"; Filename: "{app}\TorrentManager.exe"
 Filename: "{app}\install-defaults.ini"; Section: "Settings"; Key: "language"; String: "{language}"
 Filename: "{app}\install-defaults.ini"; Section: "Settings"; Key: "startup"; String: "{code:StartupValue}"
 Filename: "{app}\install-defaults.ini"; Section: "Settings"; Key: "close_to_tray"; String: "{code:TrayValue}"
+Filename: "{app}\install-defaults.ini"; Section: "Settings"; Key: "minimize_to_tray"; String: "{code:MinimizeTrayValue}"
 [Run]
 #ifndef TM_TEST_ROOT
-Filename: "{app}\TorrentManager.exe"; Description: "Launch Torrent Manager"; Flags: nowait postinstall skipifsilent runasoriginaluser
+Filename: "{app}\TorrentManager.exe"; Description: "Launch Torrent Manager"; Flags: nowait skipifsilent runasoriginaluser
 #endif
 [UninstallDelete]
 Type: files; Name: "{app}\install-defaults.ini"
@@ -128,6 +144,15 @@ end;
 function TrayValue(Param: String): String;
 begin
   if WizardIsTaskSelected('close_to_tray') then Result := 'true' else Result := 'false';
+end;
+function MinimizeTrayValue(Param: String): String;
+begin
+  if WizardIsTaskSelected('minimize_to_tray') then Result := 'true' else Result := 'false';
+end;
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = wpSelectTasks then
+    WizardForm.NextButton.Caption := SetupMessage(msgButtonInstall);
 end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
@@ -163,10 +188,24 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  UninstallKey, UninstallCommand: String;
+  RootKey: Integer;
 begin
-  if CurStep = ssPostInstall then
+  if CurStep = ssPostInstall then begin
     if not SaveStringToFile(ExpandConstant('{app}\.torrentmanager-install'), '4D0F0B02-0C6E-4C4C-9DFA-DBDAE8A15F5F', False) then
       RaiseException('Cannot write the application ownership marker.');
+    if IsAdminInstallMode then begin
+      RootKey := HKLM;
+      UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{4D0F0B02-0C6E-4C4C-9DFA-DBDAE8A15F5F}_is1';
+    end else begin
+      RootKey := HKCU;
+      UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{D186A29D-D24B-4A19-81C6-7EFD2330B872}_is1';
+    end;
+    UninstallCommand := '"' + ExpandConstant('{uninstallexe}') + '" /SILENT';
+    if not RegWriteStringValue(RootKey, UninstallKey, 'UninstallString', UninstallCommand) then
+      RaiseException('Cannot update the Windows uninstall command.');
+  end;
 end;
 
 function RunCleanup(Mode: String): Boolean;
@@ -189,7 +228,7 @@ begin
   CleanupAvailable := FileCopy(ExpandConstant('{app}\uninstall_cleanup.ps1'), CleanupScript, False);
   Result := CleanupAvailable;
   if not Result then
-    MsgBox('The cleanup helper is missing. Reinstall Torrent Manager v0.9, then uninstall it again.', mbError, MB_OK);
+    MsgBox('The cleanup helper is missing. Reinstall Torrent Manager v1.0, then uninstall it again.', mbError, MB_OK);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

@@ -260,3 +260,43 @@ TEXT['en']['about_description'] = ('Torrent Manager selects from the BitHuMen li
 for _code in LANGUAGES:
     if _code not in ('hu', 'en'):
         TEXT[_code]['about_description'] = TEXT['en']['about_description']
+
+_V1 = {
+ 'hu': ('Frissítés', 'Tárhely', 'Legutóbb letöltött torrentek', 'Tálcára helyezéskor futtatás az értesítési területen', 'Automatizálás indítása', 'Automatizálás leállítása'),
+ 'en': ('Update', 'Storage', 'Recently downloaded torrents', 'Run in notification area when minimized', 'Start automation', 'Stop automation'),
+ 'de': ('Aktualisierung', 'Speicher', 'Zuletzt heruntergeladene Torrents', 'Beim Minimieren im Infobereich weiterlaufen', 'Automatisierung starten', 'Automatisierung stoppen'),
+ 'zh': ('更新', '存储空间', '最近下载的种子', '最小化时在通知区域运行', '启动自动化', '停止自动化'),
+ 'hi': ('अपडेट', 'भंडारण', 'हाल में डाउनलोड हुए टोरेंट', 'छोटा करने पर सूचना क्षेत्र में चलाएँ', 'स्वचालन शुरू करें', 'स्वचालन रोकें'),
+ 'es': ('Actualización', 'Almacenamiento', 'Torrents descargados recientemente', 'Ejecutar en el área de notificación al minimizar', 'Iniciar automatización', 'Detener automatización'),
+ 'fr': ('Mise à jour', 'Stockage', 'Torrents récemment téléchargés', 'Exécuter dans la zone de notification si réduit', 'Démarrer l’automatisation', 'Arrêter l’automatisation'),
+ 'ar': ('تحديث', 'التخزين', 'التورنت المحمّلة مؤخرًا', 'التشغيل في منطقة الإشعارات عند التصغير', 'بدء الأتمتة', 'إيقاف الأتمتة'),
+ 'bn': ('আপডেট', 'স্টোরেজ', 'সম্প্রতি ডাউনলোড করা টরেন্ট', 'মিনিমাইজ করলে বিজ্ঞপ্তি এলাকায় চালান', 'স্বয়ংক্রিয়তা শুরু করুন', 'স্বয়ংক্রিয়তা বন্ধ করুন'),
+ 'pt': ('Atualização', 'Armazenamento', 'Torrents baixados recentemente', 'Executar na área de notificação ao minimizar', 'Iniciar automação', 'Parar automação'),
+ 'ru': ('Обновление', 'Хранилище', 'Недавно загруженные торренты', 'При сворачивании работать в области уведомлений', 'Запустить автоматизацию', 'Остановить автоматизацию'),
+ 'ur': ('اپ ڈیٹ', 'ذخیرہ', 'حال ہی میں ڈاؤن لوڈ شدہ ٹورینٹس', 'چھوٹا کرنے پر اطلاعاتی حصے میں چلائیں', 'خودکار نظام شروع کریں', 'خودکار نظام بند کریں'),
+}
+for _code, _titles in _V1.items():
+    TEXT[_code].update(zip(('versions', 'disk_info', 'recent_torrents', 'minimize_to_tray',
+                            'start_automation', 'stop_automation'), _titles))
+TEXT['hu']['release_v1'] = ('BitHuMen toplistájának automatikus figyelése és új torrentek hozzáadása qBittorrent WebUI-n keresztül.\n\n'
+    'A saját nyilvántartott torrentek biztonságos kezelése és törlése fájlokkal együtt, két teljes ellenőrzés után.\n\n'
+    'Átviteli sebesség, tárhely és letöltések áttekintése a kezdőlapon.\n\n'
+    'Értesítési területi vezérlés, teljes képernyős mód és többnyelvű felület.\n\n'
+    'Frissítés és újratelepítés ellenőrzött SHA-256 összeggel.')
+TEXT['en']['release_v1'] = ('Monitor the BitHuMen list and add torrents through qBittorrent WebUI.\n\n'
+    'Safely manage and remove only recorded torrents and their files after two full checks.\n\n'
+    'View transfer speeds, storage and recent downloads on the dashboard.\n\n'
+    'Control automation from the notification area; fullscreen and multiple languages.\n\n'
+    'Update and reinstall with SHA-256 integrity checks.')
+TEXT['hu']['no_release_notes'] = 'Ehhez a kiadáshoz nincs leírás.'
+TEXT['en']['no_release_notes'] = 'No release notes available.'
+for _code in LANGUAGES:
+    if _code not in ('hu', 'en'):
+        TEXT[_code]['release_v1'] = TEXT['en']['release_v1']
+        TEXT[_code]['no_release_notes'] = TEXT['en']['no_release_notes']
+for _code, _title in {
+    'hu': 'Bezárás', 'en': 'Close', 'de': 'Schließen', 'zh': '关闭', 'hi': 'बंद करें',
+    'es': 'Cerrar', 'fr': 'Fermer', 'ar': 'إغلاق', 'bn': 'বন্ধ করুন', 'pt': 'Fechar',
+    'ru': 'Закрыть', 'ur': 'بند کریں',
+}.items():
+    TEXT[_code]['exit'] = _title

@@ -10,7 +10,7 @@ DEFAULT = {
     "max_disk_usage_percent": 70, "max_managed_torrents": 50,
     "min_size_gb": "", "max_size_gb": "", "mode": "full",
     "headless": True, "theme": "dark", "language": "hu",
-    "startup": False, "close_to_tray": False, "desktopicon": False,
+    "startup": False, "close_to_tray": False, "minimize_to_tray": False, "desktopicon": False,
     "setup_complete": False,
 }
 MODES = ("dry", "add", "full")
@@ -41,7 +41,7 @@ def normalize_settings(saved):
         result["max_disk_usage_percent"] = int(disk)
     if result.get("theme") not in ("dark", "light", "system"):
         result["theme"] = "dark"
-    for key in ('startup', 'close_to_tray', 'desktopicon', 'setup_complete'):
+    for key in ('startup', 'close_to_tray', 'minimize_to_tray', 'desktopicon', 'setup_complete'):
         result[key] = result[key] is True
     from localization import LANGUAGES
     if result.get("language") not in LANGUAGES:

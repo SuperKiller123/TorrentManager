@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Torrent Manager v0.9 – Windows UI for the torrent engine."""
+"""Torrent Manager v1.0 – Windows UI for the torrent engine."""
 import json
 import os
 import queue
@@ -9,7 +9,6 @@ import sys
 import threading
 import time
 import tkinter as tk
-import webbrowser
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -53,7 +52,7 @@ def read_settings():
         defaults = configparser.ConfigParser()
         defaults.read(defaults_file, encoding='utf-8-sig')
         if defaults.has_section('Settings'):
-            for key in ('language', 'startup', 'close_to_tray', 'desktopicon'):
+            for key in ('language', 'startup', 'close_to_tray', 'minimize_to_tray', 'desktopicon'):
                 if key not in saved and defaults.has_option('Settings', key):
                     saved[key] = (defaults.get('Settings', key) if key == 'language'
                                   else defaults.getboolean('Settings', key))
@@ -85,6 +84,8 @@ class App:
         self.running = False
         self.closed = False
         self.tray = None
+        self._hiding_to_tray = False
+        self._was_minimized = False
         self.connected = False
         self.bithumen_ready = False
         self.connection_message = 'check_qb'
@@ -100,16 +101,11 @@ class App:
         self.release_by_version = {}
         self.downloading = False
         self.update_message = tk.StringVar(value='')
-        self.stat_disk = tk.StringVar(value='–')
         self.stat_used = tk.StringVar(value='–')
         self.home_details = tk.StringVar(value='')
         self.status = tk.StringVar(value='')
         self.webui_status = tk.StringVar(value='')
         self.next_check = tk.StringVar(value='–')
-        self.disk_fraction = 0.0
-        self.disk_target = 0.0
-        self._animating_bar = False
-        self._last_bar_update = 0.0
         self.last_action_time = time.monotonic()
         self._load_log_tail()
         root.title(' ')  # no app version or name in caption: branded sidebar is the title
@@ -130,6 +126,8 @@ class App:
         root.bind_all('<Button-4>', lambda _event: self._wheel_active(None, -3))
         root.bind_all('<Button-5>', lambda _event: self._wheel_active(None, 3))
         root.protocol('WM_DELETE_WINDOW', self.close)
+        root.bind('<Unmap>', self._on_minimize, add='+')
+        root.bind('<Map>', self._on_map, add='+')
         self._render('dashboard')
         threading.Thread(target=self._try_start_qb, daemon=True).start()
         threading.Thread(target=self._webui_loop, daemon=True).start()
@@ -308,7 +306,7 @@ class App:
                 canvas.yview_scroll(steps, 'units')
 
     def _metric(self, parent, heading, variable, subtitle=''):
-        card = self._card(parent, 13)
+        card = self._card(parent, 15)
         self._label(card, heading, 9, 'muted').pack(anchor='w')
         tk.Label(card, textvariable=variable, bg=P['panel'], fg=P['text'],
                  font=(FONT, 18, 'bold'), anchor='w').pack(anchor='w', pady=(5, 2))
@@ -335,7 +333,7 @@ class App:
         for i in range(4):
             metrics.columnconfigure(i, weight=1, uniform='metric')
         self.metric_auto = tk.StringVar()
-        cards = [(self.T('automation'), self.metric_auto), (self.T('total'), self.live_torrents),
+        cards = [(self.T('automation'), self.metric_auto), (self.T('disk_info'), self.stat_used),
                  (self.T('next'), self.next_check)]
         for i, (head, var) in enumerate(cards):
             metric = self._metric(metrics, head, var)
@@ -357,28 +355,17 @@ class App:
         extra.pack(fill='x', pady=(0, 9))
         for i in range(4):
             extra.columnconfigure(i, weight=1, uniform='extra')
-        self.mini_total = tk.StringVar(value='–')
         self.mini_interval = tk.StringVar(value='–')
         self.mini_min = tk.StringVar(value='–')
         self.mini_max = tk.StringVar(value='–')
         for i, (title, variable) in enumerate([
-            (self.T('total_n'), self.mini_total), (self.T('interval'), self.mini_interval),
+            (self.T('total'), self.live_torrents), (self.T('interval'), self.mini_interval),
             (self.T('minsize'), self.mini_min), (self.T('maxsize'), self.mini_max)]):
-            card = self._card(extra, 11)
+            card = self._card(extra, 13)
             card.grid(row=0, column=i, sticky='nsew', padx=(0, 5) if i < 3 else 0)
             self._label(card, title, 9, 'muted').pack(anchor='w')
             tk.Label(card, textvariable=variable, bg=P['panel'], fg=P['text'],
                      font=(FONT, 13, 'bold')).pack(anchor='w', pady=(5, 0))
-        disk = self._card(interior)
-        disk.pack(fill='both', expand=True, pady=(0, 9))
-        dline = tk.Frame(disk, bg=P['panel'])
-        dline.pack(fill='x')
-        self._label(dline, self.T('disk_info'), 11, bold=True).pack(side='left')
-        tk.Label(dline, textvariable=self.stat_used, bg=P['panel'], fg=P['muted'],
-                 font=(FONT, 10)).pack(side='right')
-        self.disk_track = tk.Canvas(disk, height=27, bg=P['panel'], bd=0, highlightthickness=0)
-        self.disk_track.pack(fill='x', pady=(12, 5))
-        self.disk_track.bind('<Configure>', lambda _: self._paint_disk_bar())
         more = tk.Frame(interior, bg=P['bg'])
         more.pack(fill='both', expand=True, pady=(0, 9))
         limits = self._card(more)
@@ -388,12 +375,13 @@ class App:
         self.speed_chart.pack(fill='both', expand=True)
         self.speed_chart.bind('<Configure>', lambda _: self._paint_speed())
         logcard = self._card(interior)
-        logcard.pack(fill='x', pady=(0, 9))
-        self._label(logcard, self.T('recent'), 12, bold=True).pack(anchor='w', pady=(0, 8))
-        self.preview = tk.Text(logcard, height=5, bg=P['input'], fg=P['text'], relief='flat',
-                               bd=0, padx=12, pady=11, wrap='word',
-                               font=(FONT, 10), state='disabled')
+        logcard.pack(fill='both', expand=True)
+        self._label(logcard, self.T('recent_torrents'), 12, bold=True).pack(anchor='w', pady=(0, 8))
+        self.preview = tk.Listbox(logcard, bg=P['input'], fg=P['text'], relief='flat',
+                                  bd=0, selectbackground=P['panel_hi'],
+                                  font=(FONT, 10), activestyle='none')
         self.preview.pack(fill='both', expand=True)
+        self.preview.bind('<Configure>', lambda _e: self._refresh_recent_torrents())
 
     def _group(self, parent, title):
         box = self._card(parent, 18)
@@ -473,8 +461,7 @@ class App:
         self.language_box.current(codes.index(self.cfg.get('language', 'hu')))
         self.language_box.pack(side='left', fill='x', expand=True)
         self.language_box.bind('<<ComboboxSelected>>', lambda _: self.vars['language'].set(codes[self.language_box.current()]))
-        self._label(appearance, self.T('language_note'), 9, 'muted').pack(anchor='w')
-        for key in ('startup', 'close_to_tray'):
+        for key in ('startup', 'close_to_tray', 'minimize_to_tray'):
             self.vars[key] = tk.BooleanVar(value=self.cfg.get(key, False))
             tk.Checkbutton(appearance, text=self.T(key), variable=self.vars[key],
                            bg=P['panel'], fg=P['text'], selectcolor=P['input']).pack(anchor='w')
@@ -496,7 +483,6 @@ class App:
         header = tk.Frame(page, bg=P['bg'])
         header.pack(fill='x', pady=(0, 13))
         self._label(header, self.T('logs'), 22, bold=True).pack(side='left')
-        self._button(header, self.T('open_logs'), self.open_data_folder, 'secondary', True).pack(side='right')
         box = self._card(page)
         box.pack(fill='both', expand=True)
         self._label(box, self.T('live_log'), 12, bold=True).pack(anchor='w', pady=(0, 10))
@@ -513,49 +499,68 @@ class App:
 
     def _updates(self, page):
         self._label(page, self.T('updates'), 22, bold=True).pack(anchor='w', pady=(0, 13))
-        interior, self.updates_canvas = self._scroll_page(page)
-        metrics = tk.Frame(interior, bg=P['bg'])
-        metrics.pack(fill='x', pady=(0, 10))
+        self.updates_canvas = None
+        update = self._card(page, 18)
+        update.pack(fill='x', pady=(0, 11))
+        self._label(update, self.T('versions'), 13, bold=True).pack(anchor='w', pady=(0, 9))
+        metrics = tk.Frame(update, bg=P['panel'])
+        metrics.pack(fill='x', pady=(0, 8))
         metrics.columnconfigure(0, weight=1)
         metrics.columnconfigure(1, weight=1)
-        installed = self._card(metrics, 17)
-        installed.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
+        installed = tk.Frame(metrics, bg=P['panel'])
+        installed.grid(row=0, column=0, sticky='nsew')
         self._label(installed, self.T('installed'), 9, 'muted').pack(anchor='w')
         self._label(installed, 'v' + VERSION, 21, bold=True).pack(anchor='w', pady=(6, 0))
-        newest = self._card(metrics, 17)
+        newest = tk.Frame(metrics, bg=P['panel'])
         newest.grid(row=0, column=1, sticky='nsew')
         self._label(newest, self.T('latest'), 9, 'muted').pack(anchor='w')
         self.latest_value = tk.StringVar(value='–')
         tk.Label(newest, textvariable=self.latest_value, bg=P['panel'], fg=P['text'],
                  font=(FONT, 21, 'bold'), anchor='w').pack(anchor='w', pady=(6, 0))
-        actions = self._card(interior, 18)
-        actions.pack(fill='x', pady=(0, 10))
-        self._label(actions, self.T('versions'), 12, bold=True).pack(anchor='w', pady=(0, 8))
-        tk.Label(actions, textvariable=self.update_message, bg=P['panel'], fg=P['muted'],
-                 font=(FONT, 10), justify='left', anchor='w', wraplength=720).pack(fill='x', pady=(0, 9))
-        buttons = tk.Frame(actions, bg=P['panel'])
-        buttons.pack(fill='x', pady=(0, 9))
+        tk.Label(update, textvariable=self.update_message, bg=P['panel'], fg=P['muted'],
+                 font=(FONT, 10), justify='left', anchor='w').pack(fill='x', pady=(0, 7))
+        buttons = tk.Frame(update, bg=P['panel'])
+        buttons.pack(fill='x')
         self.check_button = self._button(buttons, self.T('check'), self.check_updates, 'secondary')
-        self.check_button.pack(side='left')
+        self.check_button.pack(side='left', padx=(0, 9))
         self.version_choice = tk.StringVar()
-        self.install_button = self._button(actions, self.T('install'), self.install_update, state='disabled')
-        self.install_button.pack(fill='x', pady=(0, 9))
-        maintenance = self._card(interior, 18)
-        maintenance.pack(fill='x', pady=(0, 10))
+        self.install_button = self._button(buttons, self.T('install'), self.install_update, state='disabled')
+        self.install_button.pack(side='left')
+        maintenance = self._card(page, 18)
+        maintenance.pack(fill='x', pady=(0, 11))
         self._label(maintenance, self.T('maintenance'), 12, bold=True).pack(anchor='w', pady=(0, 8))
         self.reinstall_button = self._button(maintenance, self.T('reinstall'), self.reinstall, 'secondary', True, 'disabled')
         self.reinstall_button.pack(side='left', padx=(0, 10))
         self._button(maintenance, self.T('uninstall'), self.uninstall, 'secondary', True).pack(side='left')
-        self._label(actions, self.T('download_note'), 9, 'muted', wraplength=720, justify='left').pack(anchor='w')
-        about = self._card(interior, 18)
-        about.pack(fill='both', expand=True)
-        self._label(about, self.T('about'), 12, bold=True).pack(anchor='w', pady=(0, 8))
-        description = self.T('about_description')
-        about_text = self._label(about, description, 10, 'text', wraplength=720, justify='left')
-        about_text.pack(anchor='w', fill='x', pady=(0, 15))
-        about_text.bind('<Configure>', lambda e: about_text.configure(wraplength=max(200, e.width-8)))
-        self._button(about, self.T('github'), lambda: webbrowser.open('https://github.com/' + GITHUB_REPO),
-                     'secondary').pack(anchor='w')
+        notes = self._card(page, 18)
+        notes.pack(fill='both', expand=True)
+        self.notes_columns = tk.Frame(notes, bg=P['panel'])
+        self.notes_columns.pack(fill='both', expand=True)
+        self._render_release_notes()
+
+    def _render_release_notes(self):
+        if not hasattr(self, 'notes_columns'):
+            return
+        for child in self.notes_columns.winfo_children():
+            child.destroy()
+        current = tk.Frame(self.notes_columns, bg=P['panel'])
+        current.pack(side='left', fill='both', expand=True)
+        self._label(current, f'Torrent Manager v{VERSION}', 12, bold=True).pack(anchor='w', pady=(0, 8))
+        self._note_text(current, self.T('release_v1'))
+        newer = next((r for r in self.releases if parse_version(r['version']) > parse_version(VERSION)), None)
+        if newer:
+            other = tk.Frame(self.notes_columns, bg=P['panel'])
+            other.pack(side='left', fill='both', expand=True, padx=(20, 0))
+            self._label(other, newer['version'], 12, bold=True).pack(anchor='w', pady=(0, 8))
+            self._note_text(other, newer.get('notes') or self.T('no_release_notes'))
+
+    def _note_text(self, parent, content):
+        viewer = tk.Text(parent, width=1, height=1, wrap='word', bg=P['panel'], fg=P['text'],
+                         selectbackground=P['panel_hi'], relief='flat', bd=0,
+                         highlightthickness=0, font=(FONT, 10), padx=0, pady=0)
+        viewer.insert('1.0', content)
+        viewer.configure(state='disabled')
+        viewer.pack(fill='both', expand=True)
 
     def _load_log_tail(self):
         if not LOG.exists():
@@ -577,12 +582,23 @@ class App:
             self._write_log_widget(self.logbox, line)
         self.logbox.configure(state='disabled')
         self.logbox.see('end')
-        self.preview.configure(state='normal')
-        self.preview.delete('1.0', 'end')
-        for line in self.log_lines[-14:]:
-            self.preview.insert('end', line[:250] + '\n')
-        self.preview.configure(state='disabled')
-        self.preview.see('end')
+        self._refresh_recent_torrents()
+
+    def _refresh_recent_torrents(self):
+        if not hasattr(self, 'preview') or not self.preview.winfo_exists():
+            return
+        names = []
+        for line in reversed(self.log_lines):
+            if 'Letöltve:' in line:
+                name = line.split('Letöltve:', 1)[1].strip()
+                if name and name not in names:
+                    names.append(name)
+        height = max(1, self.preview.winfo_height() // 24)
+        names = names[:height]
+        if list(self.preview.get(0, 'end')) != names:
+            self.preview.delete(0, 'end')
+            for name in names:
+                self.preview.insert('end', name)
 
     def _write_log_widget(self, widget, line):
         lower = line.lower()
@@ -595,7 +611,8 @@ class App:
         self.log_lines.append(line)
         self.log_lines = self.log_lines[-1400:]
         self._write_text(self.logbox, line, styled=True)
-        self._write_text(self.preview, line[:250], maxlines=55)
+        if 'Letöltve:' in line:
+            self._refresh_recent_torrents()
 
     def _write_text(self, widget, line, styled=False, maxlines=1400):
         widget.configure(state='normal')
@@ -692,6 +709,8 @@ class App:
         self.start_btn.configure(state='disabled' if running or not self.connected else 'normal',
                                  bg=P['line'] if running or not self.connected else P['blue'])
         self.stop_btn.configure(state='normal' if running else 'disabled')
+        if self.tray:
+            self.tray.update_menu()
 
     def _bit_status(self):
         if hasattr(self, 'bit_indicator'):
@@ -839,31 +858,6 @@ class App:
         down, up = self.speed_history[-1]
         canvas.create_text(8,8, anchor='nw', text=f'↓ {down/1e6:.2f} MB/s   ↑ {up/1e6:.2f} MB/s', fill=P['text'])
 
-    def _paint_disk_bar(self):
-        if not hasattr(self, 'disk_track') or not self.disk_track.winfo_exists():
-            return
-        w = max(1, self.disk_track.winfo_width())
-        self.disk_track.delete('all')
-        self.disk_track.create_rectangle(0, 0, w, 13, fill=P['input'], outline='')
-        color = P['amber'] if self.disk_target > int(self.cfg.get('max_disk_usage_percent', 70)) / 100 else P['green']
-        self.disk_track.create_rectangle(0, 0, int(w*self.disk_fraction), 13,
-                                         fill=color, outline='')
-
-    def _animate_disk(self):
-        if self.closed:
-            self._animating_bar = False
-            return
-        delta = self.disk_target - self.disk_fraction
-        if abs(delta) < .003:
-            self.disk_fraction = self.disk_target
-            self._paint_disk_bar()
-            self._animating_bar = False
-            return
-        # ~60 FPS for short easing animations, idle UI has no continuous render loop.
-        self.disk_fraction += delta * .18
-        self._paint_disk_bar()
-        self.root.after(16, self._animate_disk)
-
     def refresh_stats(self):
         cfg = self.cfg
         try:
@@ -873,20 +867,13 @@ class App:
             usage = shutil.disk_usage(path)
             percent = 100 * usage.used / usage.total
             limit = int(cfg['max_disk_usage_percent'])
-            self.stat_disk.set(f'{percent:.1f}%')
-            self.stat_used.set(f'{percent:.1f}% / {limit}%')
-            self.disk_target = max(0., min(1., percent / 100))
+            self.stat_used.set(f'{percent:.1f}%/{limit}%')
         except (OSError, ValueError, ZeroDivisionError):
-            self.stat_disk.set('–')
             self.stat_used.set(self.T('unavailable'))
-            self.disk_target = 0.
-        if not self._animating_bar:
-            self._animating_bar = True
-            self._animate_disk()
+        self._refresh_recent_torrents()
         lo, hi = cfg.get('min_size_gb',''), cfg.get('max_size_gb','')
         sizes = (f'{lo or "–"} – {hi or "–"} GB') if lo or hi else self.T('no_limit')
-        if hasattr(self, 'mini_total'):
-            self.mini_total.set(str(cfg['max_managed_torrents']))
+        if hasattr(self, 'mini_interval'):
             self.mini_interval.set(str(cfg['check_minutes']) + ' min')
             self.mini_min.set(str(lo) + ' GB' if lo else '–')
             self.mini_max.set(str(hi) + ' GB' if hi else '–')
@@ -929,8 +916,9 @@ class App:
         self.install_button.configure(text=self.T('install'), state='normal' if enabled else 'disabled',
                                       bg=P['blue'] if enabled else P['line'])
         current = next((item for item in self.releases if parse_version(item['version']) == parse_version(VERSION)), None)
-        self.reinstall_button.configure(state='normal' if not self.downloading and current and
-                                        current.get('installer') and current.get('checksums') else 'disabled')
+        reinstallable = bool(not self.downloading and current and current.get('installer') and current.get('checksums'))
+        self.reinstall_button.configure(state='normal' if reinstallable else 'disabled',
+                                        bg=P['panel_hi'] if reinstallable else P['line'])
 
     def reinstall(self):
         current = next((item for item in self.releases if parse_version(item['version']) == parse_version(VERSION)), None)
@@ -994,7 +982,7 @@ class App:
         if self.proc and self.proc.poll() is None:
             self.stop()
         try:
-            subprocess.Popen([str(uninstallers[-1])], cwd=str(BASE),
+            subprocess.Popen([str(uninstallers[-1]), '/SILENT'], cwd=str(BASE),
                              creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         except OSError as exc:
             messagebox.showerror('Torrent Manager', str(exc), parent=self.root)
@@ -1051,9 +1039,16 @@ class App:
             while True:
                 kind, data = self.events.get_nowait()
                 if kind == 'restore':
-                    self.root.deiconify()
-                    self.root.lift()
+                    self._restore('dashboard')
+                elif kind == 'navigate':
+                    self._restore(data)
+                elif kind == 'start':
+                    self.start()
+                elif kind == 'stop':
+                    self.stop()
                 elif kind == 'exit':
+                    if self.running:
+                        self._restore('dashboard')
                     self.exit()
                     if self.closed:
                         return
@@ -1093,6 +1088,7 @@ class App:
                 elif kind == 'releases_ok':
                     self.releases = data
                     self._releases_to_combobox()
+                    self._render_release_notes()
                     self.latest_value.set(data[0]['version'] if data else '–')
                     self.update_message.set(self.T(release_state(data)))
                     self.check_button.configure(state='normal')
@@ -1121,20 +1117,64 @@ class App:
 
     def close(self):
         if self.cfg.get('close_to_tray'):
-            try:
-                if self.tray is None:
-                    import pystray
-                    from PIL import Image
-                    self.tray = pystray.Icon('TorrentManager', Image.open(Path(getattr(sys, '_MEIPASS', BASE)) / 'assets' / 'app_icon.ico'),
-                        'Torrent Manager', menu=pystray.Menu(
-                            pystray.MenuItem(self.T('show'), lambda *_: self.events.put(('restore', None)), default=True),
-                            pystray.MenuItem(self.T('exit'), lambda *_: self.events.put(('exit', None)))))
-                    self.tray.run_detached()
-                self.root.withdraw()
+            if self._hide_to_tray():
                 return
-            except Exception as exc:
-                self.append(str(exc))
         self.exit()
+
+    def _on_minimize(self, _event):
+        if not self._hiding_to_tray and not self.closed and self.root.state() == 'iconic':
+            self._was_minimized = True
+            if self.cfg.get('minimize_to_tray'):
+                self.root.after_idle(self._hide_to_tray)
+
+    def _on_map(self, _event):
+        if self._was_minimized and self.root.state() != 'iconic':
+            self._was_minimized = False
+            self.show_page('dashboard')
+
+    def _hide_to_tray(self):
+        if self._hiding_to_tray:
+            return True
+        try:
+            if self.tray is None:
+                import pystray
+                from PIL import Image
+                menu = pystray.Menu(
+                    pystray.MenuItem(lambda _: self.T('home'), lambda *_: self.events.put(('navigate', 'dashboard')), default=True),
+                    pystray.MenuItem(lambda _: self.T('settings'), lambda *_: self.events.put(('navigate', 'settings'))),
+                    pystray.MenuItem(lambda _: self.T('logs'), lambda *_: self.events.put(('navigate', 'activity'))),
+                    pystray.MenuItem(lambda _: self.T('updates'), lambda *_: self.events.put(('navigate', 'updates'))),
+                    pystray.Menu.SEPARATOR,
+                    pystray.MenuItem(lambda _: self.T('start_automation'), lambda *_: self.events.put(('start', None)),
+                                     enabled=lambda _: not self.running),
+                    pystray.MenuItem(lambda _: self.T('stop_automation'), lambda *_: self.events.put(('stop', None)),
+                                     enabled=lambda _: self.running),
+                    pystray.Menu.SEPARATOR,
+                    pystray.MenuItem(lambda _: self.T('exit'), lambda *_: self.events.put(('exit', None))))
+                icon = pystray.Icon('TorrentManager', Image.open(Path(getattr(sys, '_MEIPASS', BASE)) / 'assets' / 'app_icon.ico'),
+                                    'Torrent Manager', menu=menu)
+                icon.run_detached()
+                self.tray = icon
+            self._hiding_to_tray = True
+            if self.fullscreen.active:
+                self.fullscreen.toggle()
+            self.root.withdraw()
+            self._hiding_to_tray = False
+            return True
+        except Exception as exc:
+            self._hiding_to_tray = False
+            self.append(str(exc))
+            return False
+
+    def _restore(self, page='dashboard'):
+        self.root.deiconify()
+        try:
+            self.root.state('zoomed')
+        except tk.TclError:
+            pass
+        self.show_page(page)
+        self.root.lift()
+        self.root.focus_force()
 
     def exit(self):
         if self.proc and self.proc.poll() is None:

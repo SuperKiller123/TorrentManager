@@ -46,24 +46,32 @@ def run():
         qb_sentinel = qb / 'settings.ini'
         qb_sentinel.write_bytes(b'keep qBittorrent settings unchanged')
         qb_sentinels.append(qb_sentinel)
-    compiler = REPO / '.tools/Inno/ISCC.exe'
+    compiler = next((p for p in (
+        REPO / '.tools/Inno/ISCC.exe',
+        Path(os.environ.get('LOCALAPPDATA', '')) / 'Programs/Inno Setup 6/ISCC.exe',
+        Path(os.environ.get('ProgramFiles(x86)', '')) / 'Inno Setup 6/ISCC.exe') if p.is_file()), None)
+    if compiler is None:
+        raise RuntimeError('Inno Setup 6 compiler not found')
     compiled = subprocess.run([str(compiler), '/Qp', f'/DTM_TEST_ROOT={root}',
-        f'/DTM_TEST_SOURCE={payload}', f'/O{root}', '/FTorrentManager-test-v08',
+        f'/DTM_TEST_SOURCE={payload}', f'/O{root}', '/FTorrentManager-test-v1',
         str(REPO / 'installer.iss')], capture_output=True, text=True, timeout=180)
     (root / 'compile.log').write_text(compiled.stdout + compiled.stderr, encoding='utf-8')
     if compiled.returncode:
         raise RuntimeError(f'Compiler failed; see {root / "compile.log"}: {compiled.stdout} {compiled.stderr}')
-    setup = root / 'TorrentManager-test-v08.exe'
+    setup = root / 'TorrentManager-test-v1.exe'
     app = root / 'Torrent Manager'
     installed = subprocess.run([str(setup), '/VERYSILENT', '/SUPPRESSMSGBOXES',
-        '/NORESTART', '/LANG=hu', '/TASKS=startup,close_to_tray',
+        '/NORESTART', '/LANG=hu', '/TASKS=startup,close_to_tray,minimize_to_tray',
         f'/LOG={root / "install.log"}'], timeout=120)
     if installed.returncode:
         raise RuntimeError(f'Install exit code {installed.returncode}; fixture at {root}')
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_PATH, 0, FLAGS) as key:
         display = winreg.QueryValueEx(key, 'DisplayName')[0]
+        uninstall_command = winreg.QueryValueEx(key, 'UninstallString')[0]
     assert display == 'Torrent Manager', display
+    assert uninstall_command.endswith(' /SILENT'), uninstall_command
     assert 'language=hu' in (app / 'install-defaults.ini').read_text(encoding='utf-8-sig')
+    assert 'minimize_to_tray=true' in (app / 'install-defaults.ini').read_text(encoding='utf-8-sig')
     # Runtime-generated files that Inno never registered must also disappear.
     generated = app / 'generated-cache/nested'
     generated.mkdir(parents=True)

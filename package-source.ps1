@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 $repo = $PSScriptRoot
 $output = Join-Path (Split-Path (Split-Path $repo -Parent) -Parent) 'outputs'
 New-Item -ItemType Directory -Path $output -Force | Out-Null
-$archive = Join-Path $output 'TorrentManager-v0.9-source.zip'
+$archive = Join-Path $output 'TorrentManager-v1.0-source.zip'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 if (Test-Path -LiteralPath $archive) { throw 'Source archive already exists; review before replacing.' }
 $zip = [IO.Compression.ZipFile]::Open($archive, [IO.Compression.ZipArchiveMode]::Create)
